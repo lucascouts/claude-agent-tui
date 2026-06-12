@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.2.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.1.1...v0.2.0) (2026-06-12)
+
+
+### Features
+
+* migrate @agentclientprotocol/sdk to 0.25.0 (SessionModel → configOption "model") ([8d7b87d](https://github.com/lucascouts/claude-agent-tui/commit/8d7b87d23d7cf0288dd9e0f5548069d809b7cc09))
+  * `0.25.0` removed the `SessionModel` protocol surface. Model selection now flows through the generic `configOptions` mechanism (`category: "model"`), built from `modelInfos` — the advertised selector content is unchanged.
+  * Removed the dead legacy surface: the `SessionModelState` / `SetSessionModel*` types, the `unstable_setSessionModel` method, and the `models` field on `NewSessionResponse`. Internal model-matching logic (`resolveModelPreference`, `inferContextWindowFromModel`, …) is preserved unchanged.
+  * Updated the `session-update-union` pin to `0.25.0`; the `SessionUpdate` union additively gained `plan_update` and `plan_removed`.
+  * Dropped the `@agentclientprotocol/sdk` hold from Dependabot now that the migration has landed.
+
 ## [0.1.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.1.0...v0.1.1) (2026-06-12)
 
 

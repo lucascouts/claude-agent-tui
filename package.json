@@ -3,7 +3,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "ACP agent that drives the Claude Code subscription TUI over a PTY, rendering Claude Code threads in Zed and other ACP-compatible clients.",
   "main": "dist/lib.js",
   "types": "dist/lib.d.ts",
