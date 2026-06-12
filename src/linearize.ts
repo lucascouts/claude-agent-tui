@@ -347,6 +347,7 @@ export async function readOrderedMessages(
     // R1.3 contingency signal: surface the drift loudly with the resolved coordinates. Never `[]`.
     throw new Error(
       `getSessionMessages failed for sessionId="${sessionId}" dir="${dir ?? "<none>"}": ${String(err)}`,
+      { cause: err },
     );
   }
 }

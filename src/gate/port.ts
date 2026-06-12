@@ -18,7 +18,7 @@
 //
 // OFFLINE: this module binds/closes loopback sockets only; it spawns NO `claude` and bills nothing.
 
-import { createServer, type Server } from "node:net";
+import { createServer } from "node:net";
 
 /** Bounded retry budget — re-select this many times before failing loudly (R1.4). */
 export const DEFAULT_PORT_ATTEMPTS = 10;
@@ -112,7 +112,6 @@ export async function findFreePort(
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     // 1) OS-assign a currently-free ephemeral port by listening on :0.
-    let candidate: number;
     let probe: PortServer;
     try {
       probe = await listenOnce(makeServer, LOOPBACK_HOST, 0);
@@ -127,7 +126,7 @@ export async function findFreePort(
       await closeQuietly(probe);
       continue;
     }
-    candidate = address.port;
+    const candidate = address.port;
     await closeQuietly(probe);
 
     // 2) Re-bind the SAME port to PROVE it is still free at adoption time (verification bind).

@@ -185,6 +185,7 @@ export function parsePriorSettings(text: string): SettingsLike {
     throw new Error(
       `parsePriorSettings: settings.local.json is not parseable JSON/JSONC (${reason}). Refusing to ` +
         `clobber it blindly — the inject path must fall back to a safe handling of a corrupt file.`,
+      { cause: err },
     );
   }
 }
@@ -333,6 +334,7 @@ export async function injectHook(opts: {
     throw new Error(
       `injectHook: failed to write ${settingsPath} (${err instanceof Error ? err.message : String(err)}). ` +
         `Rolled back to the prior on-disk state; refusing to leave a half-written settings.local.json.`,
+      { cause: err },
     );
   }
 
@@ -383,6 +385,7 @@ export async function restore(backup: Backup): Promise<RestoreResult> {
     } catch (err) {
       throw new Error(
         `restore: file missing and backup re-apply failed (${err instanceof Error ? err.message : String(err)}).`,
+        { cause: err },
       );
     }
   }
@@ -427,6 +430,7 @@ export async function restore(backup: Backup): Promise<RestoreResult> {
         `restore: surgical removal failed AND backup fallback failed ` +
           `(${err instanceof Error ? err.message : String(err)}). The fork hook may be stranded — manual ` +
           `inspection of ${backup.settingsPath} is required.`,
+        { cause: err },
       );
     }
   }

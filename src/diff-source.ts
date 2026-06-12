@@ -260,6 +260,11 @@ export function toDiffToolResponse(source: DiffSource): DiffToolResponseInput | 
     case "unsupported":
     case "not-a-diff-source":
       return null;
+    default: {
+      // Exhaustiveness guard: if a new DiffSource kind is added, tsc flags this `never` assignment.
+      const _exhaustive: never = source;
+      return _exhaustive;
+    }
   }
 }
 

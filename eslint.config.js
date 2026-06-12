@@ -45,6 +45,9 @@ export default [
       ],
       "no-console": "off",
       "no-constant-condition": "off",
+      // no-undef is redundant in TS (tsc resolves types/globals) and false-positives on
+      // ambient type namespaces like NodeJS.*; disable per typescript-eslint guidance.
+      "no-undef": "off",
       "default-case": "error",
       "prefer-const": "error",
       "no-var": "error",
