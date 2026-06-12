@@ -1,0 +1,9 @@
+# Local secret-scanning hook. Enable once with: pre-commit install
+# (requires `pip install pre-commit` or `pipx install pre-commit`).
+# The CI job "Secret scan (gitleaks)" is the enforced gate; this hook is a
+# fast local layer that blocks a secret before it ever reaches a commit.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
