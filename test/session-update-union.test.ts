@@ -4,15 +4,17 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// Story 011 / Task 4.1 — lock that the `SessionUpdate` discriminated union is reused
-// UNCHANGED from the frozen `@agentclientprotocol/sdk` 0.22.1: no local redefinition
-// or shape drift, proving the ACP schema layer is kept 1:1 (§3 base congelada).
+// Story 011 / Task 4.1 (updated by story 045) — lock that the `SessionUpdate`
+// discriminated union is reused 1:1 from `@agentclientprotocol/sdk` 0.25.0: no local
+// redefinition or unexpected shape drift, proving the ACP schema layer is kept 1:1.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const forkRoot = join(here, "..");
 const sdkRoot = join(forkRoot, "node_modules", "@agentclientprotocol", "sdk");
 
-// The frozen 0.22.1 discriminant set (the `sessionUpdate` literal of each variant).
+// The 0.25.0 discriminant set (the `sessionUpdate` literal of each variant).
+// 0.25.0 added `plan_update` and `plan_removed` to the union (additive vs 0.22.1);
+// nothing was removed (story 045 — SDK migration).
 const EXPECTED_VARIANTS = [
   "user_message_chunk",
   "agent_message_chunk",
@@ -20,6 +22,8 @@ const EXPECTED_VARIANTS = [
   "tool_call",
   "tool_call_update",
   "plan",
+  "plan_update",
+  "plan_removed",
   "available_commands_update",
   "current_mode_update",
   "config_option_update",
@@ -27,9 +31,9 @@ const EXPECTED_VARIANTS = [
   "usage_update",
 ];
 
-test("session update union: the ACP SDK is pinned to the frozen 0.22.1", () => {
+test("session update union: the ACP SDK is pinned to 0.25.0", () => {
   const pkg = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "0.22.1", "the frozen ACP schema/transport SDK must stay 0.22.1");
+  assert.equal(pkg.version, "0.25.0", "the ACP schema/transport SDK is pinned at 0.25.0 (story 045)");
 });
 
 test("session update union: SessionUpdate is not redefined or shadowed in fork src", () => {
@@ -43,7 +47,7 @@ test("session update union: SessionUpdate is not redefined or shadowed in fork s
   }
 });
 
-test("session update union: variant set imports unchanged from SDK 0.22.1 (no shape drift)", () => {
+test("session update union: variant set matches SDK 0.25.0 (no unexpected shape drift)", () => {
   const dts = readFileSync(join(sdkRoot, "dist", "schema", "types.gen.d.ts"), "utf8");
   const declIdx = dts.indexOf("export type SessionUpdate =");
   assert.ok(declIdx !== -1, "SessionUpdate union must be defined in the SDK type surface");
@@ -55,7 +59,7 @@ test("session update union: variant set imports unchanged from SDK 0.22.1 (no sh
   assert.deepEqual(
     [...found].sort(),
     [...EXPECTED_VARIANTS].sort(),
-    "the SessionUpdate discriminated-union variant set drifted from frozen 0.22.1",
+    "the SessionUpdate discriminated-union variant set drifted from the expected 0.25.0 set",
   );
 });
 

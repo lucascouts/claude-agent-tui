@@ -15,8 +15,8 @@ function installedVersion(pkgName: string): string {
   return String(p.version);
 }
 
-test("fork install: @agentclientprotocol/sdk resolves to exactly 0.22.1 (R3.1)", () => {
-  assert.equal(installedVersion("@agentclientprotocol/sdk"), "0.22.1");
+test("fork install: @agentclientprotocol/sdk resolves to exactly 0.25.0 (R3.1)", () => {
+  assert.equal(installedVersion("@agentclientprotocol/sdk"), "0.25.0");
 });
 
 test("fork install: @anthropic-ai/claude-agent-sdk resolves to exactly 0.3.166 (R3.1)", () => {

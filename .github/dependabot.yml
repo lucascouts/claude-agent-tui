@@ -16,10 +16,6 @@ updates:
       default-days: 7
     allow:
       - dependency-type: "all"
-    ignore:
-      # Held at 0.22.1: 0.25.0 removed the SessionModel API the fork's
-      # model-selection feature depends on. Bump only via a migration story.
-      - dependency-name: "@agentclientprotocol/sdk"
     groups:
       minor:
         update-types:
