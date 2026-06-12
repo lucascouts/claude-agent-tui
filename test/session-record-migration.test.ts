@@ -79,11 +79,10 @@ function methodBody(src: string, declaration: string): string {
   return src.slice(startIdx, i + 1);
 }
 
-test("the 6 migrated control methods reference no `session.query` / `.query.`", () => {
+test("the migrated control methods reference no `session.query` / `.query.`", () => {
   const src = readFileSync(ACP_AGENT_SRC, "utf8");
 
   const methods = [
-    "async unstable_setSessionModel(",
     "async setSessionConfigOption(",
     "private async applySessionMode(",
     "private async applyConfigOptionValue(",
@@ -102,6 +101,25 @@ test("the 6 migrated control methods reference no `session.query` / `.query.`", 
       `${decl.trim()} must not reference \`session.query\` after the Degrau-1 migration`,
     );
   }
+});
+
+test("model selection is served via setSessionConfigOption (no legacy unstable_setSessionModel surface)", () => {
+  const src = readFileSync(ACP_AGENT_SRC, "utf8");
+  // The legacy SessionModel surface was removed in the 0.25.0 migration (story 045).
+  assert.ok(
+    !/unstable_setSessionModel/.test(src),
+    "the removed-protocol `unstable_setSessionModel` method must be gone",
+  );
+  assert.ok(
+    !/SessionModelState|SetSessionModelRequest|SetSessionModelResponse/.test(src),
+    "no legacy SessionModel* protocol type references remain",
+  );
+  // Model is now one config-option among several, switched via setSessionConfigOption.
+  const body = methodBody(src, "async setSessionConfigOption(");
+  assert.ok(
+    /configId === "model"/.test(body),
+    "setSessionConfigOption handles the `model` config option",
+  );
 });
 
 test("teardownSession tears down via the engine handle (cleanup/kill), not query.close()", () => {

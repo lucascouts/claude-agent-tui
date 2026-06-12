@@ -24,13 +24,10 @@ import {
   ResumeSessionRequest,
   ResumeSessionResponse,
   SessionConfigOption,
-  SessionModelState,
   SessionModeState,
   SessionNotification,
   SetSessionConfigOptionRequest,
   SetSessionConfigOptionResponse,
-  SetSessionModelRequest,
-  SetSessionModelResponse,
   SetSessionModeRequest,
   SetSessionModeResponse,
   ToolCallContent,
@@ -177,7 +174,6 @@ type Session = {
   settingsManager: SettingsManager;
   accumulatedUsage: AccumulatedUsage;
   modes: SessionModeState;
-  models: SessionModelState;
   modelInfos: ModelInfo[];
   configOptions: SessionConfigOption[];
   /** Context window size of the last top-level assistant model, carried across
@@ -554,20 +550,6 @@ const DEGRAU1_DEFAULT_MODEL_INFO: ModelInfo = {
   displayName: "Default",
   description: "Default model (selection is owned by the interactive TUI in Degrau-1)",
 };
-
-/** Build the static Degrau-1 model state (no SDK initializationResult). Single default model. */
-function buildDegrau1Models(): SessionModelState {
-  return {
-    availableModels: [
-      {
-        modelId: DEGRAU1_DEFAULT_MODEL_INFO.value,
-        name: DEGRAU1_DEFAULT_MODEL_INFO.displayName,
-        description: DEGRAU1_DEFAULT_MODEL_INFO.description,
-      },
-    ],
-    currentModelId: DEGRAU1_DEFAULT_MODEL_INFO.value,
-  };
-}
 
 /** Compute a stable fingerprint of the session-defining params so we can
  *  detect when a loadSession/resumeSession call requires tearing down and
@@ -1347,25 +1329,6 @@ export class ClaudeAcpAgent implements Agent {
     return {};
   }
 
-  async unstable_setSessionModel(
-    params: SetSessionModelRequest,
-  ): Promise<SetSessionModelResponse | void> {
-    const session = this.sessions[params.sessionId];
-    if (!session) {
-      throw new Error("Session not found");
-    }
-    // Resolve aliases (e.g. "opus", "opus[1m]") to canonical model IDs so
-    // downstream lookups in modelInfos succeed and the effort option isn't
-    // silently dropped.
-    const resolved = resolveModelPreference(session.modelInfos, params.modelId);
-    const modelId = resolved?.value ?? params.modelId;
-    // === SEAM(023) Group 1: read-only Degrau-1 shim — update local model state + emit the ACP
-    // config_option_update notification only. No SDK `query.setModel`. The interactive TUI owns
-    // real model selection in Degrau-1.
-    // Degrau 2 (030/032): PTY-backed control — drive the TUI to switch models. ===
-    await this.updateConfigOption(params.sessionId, "model", modelId);
-  }
-
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
     if (!this.sessions[params.sessionId]) {
       throw new Error("Session not found");
@@ -1954,14 +1917,19 @@ export class ClaudeAcpAgent implements Agent {
         o.id === configId && typeof o.currentValue === "string" ? { ...o, currentValue: value } : o,
       );
     } else if (configId === "model") {
-      if (session.models.currentModelId !== value) {
+      // Model state lives in the configOptions "model" option (the legacy
+      // SessionModel surface was removed in the 0.25.0 migration). Read the
+      // previous value from that option before the rebuild below repoints it.
+      const modelOption = session.configOptions.find((o) => o.id === "model");
+      const previousModelId =
+        typeof modelOption?.currentValue === "string" ? modelOption.currentValue : undefined;
+      if (previousModelId !== value) {
         // The cached context window was learned for the previous model; reset
         // to the new model's heuristic so mid-stream updates between now and
         // the next `result` reflect the user's selection instead of the old
         // model's window.
         session.contextWindowSize = inferContextWindowFromModel(value) ?? DEFAULT_CONTEXT_WINDOW;
       }
-      session.models = { ...session.models, currentModelId: value };
 
       // Recompute availableModes for the new model and clamp the current
       // mode if the SDK no longer offers it (today: "auto" on Haiku).
@@ -1991,7 +1959,7 @@ export class ClaudeAcpAgent implements Agent {
         typeof effortOpt?.currentValue === "string" ? effortOpt.currentValue : undefined;
       session.configOptions = buildConfigOptions(
         session.modes,
-        session.models,
+        value,
         session.modelInfos,
         currentEffort,
       );
@@ -2042,7 +2010,6 @@ export class ClaudeAcpAgent implements Agent {
         return {
           sessionId: params.sessionId,
           modes: existingSession.modes,
-          models: existingSession.models,
           configOptions: existingSession.configOptions,
         };
       }
@@ -2069,7 +2036,6 @@ export class ClaudeAcpAgent implements Agent {
     return {
       sessionId: response.sessionId,
       modes: response.modes,
-      models: response.models,
       configOptions: response.configOptions,
     };
   }
@@ -2178,7 +2144,6 @@ export class ClaudeAcpAgent implements Agent {
     }
 
     // Static Degrau-1 model/mode/config defaults (the TUI owns real selection in Degrau-1).
-    const models = buildDegrau1Models();
     const availableModes = buildAvailableModes(DEGRAU1_DEFAULT_MODEL_INFO);
     const modes: SessionModeState = {
       currentModeId: "default",
@@ -2186,7 +2151,7 @@ export class ClaudeAcpAgent implements Agent {
     };
     const configOptions = buildConfigOptions(
       modes,
-      models,
+      DEGRAU1_DEFAULT_MODEL_INFO.value,
       [DEGRAU1_DEFAULT_MODEL_INFO],
       settingsManager.getSettings().effortLevel,
     );
@@ -2215,18 +2180,16 @@ export class ClaudeAcpAgent implements Agent {
         cachedWriteTokens: 0,
       },
       modes,
-      models,
       modelInfos: [DEGRAU1_DEFAULT_MODEL_INFO],
       configOptions,
       contextWindowSize:
-        inferContextWindowFromModel(models.currentModelId) ?? DEFAULT_CONTEXT_WINDOW,
+        inferContextWindowFromModel(DEGRAU1_DEFAULT_MODEL_INFO.value) ?? DEFAULT_CONTEXT_WINDOW,
       taskState,
       gate,
     };
 
     return {
       sessionId: startedSessionId,
-      models,
       modes,
       configOptions,
     };
@@ -2294,7 +2257,7 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
 
 function buildConfigOptions(
   modes: SessionModeState,
-  models: SessionModelState,
+  currentModelId: string,
   modelInfos: ModelInfo[],
   currentEffortLevel?: string,
 ): SessionConfigOption[] {
@@ -2318,17 +2281,17 @@ function buildConfigOptions(
       description: "AI model to use",
       category: "model",
       type: "select",
-      currentValue: models.currentModelId,
-      options: models.availableModels.map((m) => ({
-        value: m.modelId,
-        name: m.name,
+      currentValue: currentModelId,
+      options: modelInfos.map((m) => ({
+        value: m.value,
+        name: m.displayName,
         description: m.description ?? undefined,
       })),
     },
   ];
 
   // Add effort level option based on the currently selected model
-  const currentModelInfo = modelInfos.find((m) => m.value === models.currentModelId);
+  const currentModelInfo = modelInfos.find((m) => m.value === currentModelId);
   const supportedLevels = currentModelInfo?.supportsEffort
     ? (currentModelInfo.supportedEffortLevels ?? [])
     : [];

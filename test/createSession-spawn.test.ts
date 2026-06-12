@@ -75,7 +75,7 @@ test("createSession returns a sessionId and starts the PTY engine via the inject
   assert.equal(fake.calls[0].cwd, "/work/dir", "the engine spawns in the requested host cwd");
 });
 
-test("createSession returns the ACP NewSessionResponse shape (sessionId + models + modes + configOptions)", async (t) => {
+test("createSession returns the ACP NewSessionResponse shape (sessionId + modes + configOptions; model served as a config-option)", async (t) => {
   const fake = makeFakeStartEngine();
   const agent = new ClaudeAcpAgent(makeClient(), undefined, undefined, {
     startEngine: fake.startEngine,
@@ -86,17 +86,30 @@ test("createSession returns the ACP NewSessionResponse shape (sessionId + models
     createSession: (p: unknown, o?: unknown) => Promise<unknown>;
   }).createSession({ cwd: "/work", mcpServers: [] })) as {
     sessionId: string;
-    models: { availableModels: unknown[]; currentModelId: string };
     modes: { availableModes: unknown[]; currentModeId: string };
-    configOptions: unknown[];
+    configOptions: Array<{
+      id: string;
+      category: string;
+      currentValue?: unknown;
+      options?: Array<{ value: string }>;
+    }>;
   };
 
-  assert.ok(response.models, "models present");
-  assert.ok(Array.isArray(response.models.availableModels), "models.availableModels is an array");
-  assert.ok(response.models.currentModelId, "a current model id is set");
+  // Post-0.25.0 migration: the legacy `models` field is gone from
+  // NewSessionResponse; model selection is served as a `category:"model"`
+  // config-option within `configOptions` instead (story 045).
+  assert.ok(!("models" in response), "no legacy `models` field on the response");
   assert.ok(response.modes, "modes present");
   assert.equal(response.modes.currentModeId, "default", "the static Degrau-1 default mode is `default`");
   assert.ok(Array.isArray(response.configOptions), "configOptions is an array");
+
+  const modelOption = response.configOptions.find((o) => o.category === "model");
+  assert.ok(modelOption, "a `category:'model'` config-option is present");
+  assert.equal(modelOption.currentValue, "default", "the current model id is the Degrau-1 default");
+  assert.ok(
+    Array.isArray(modelOption.options) && modelOption.options.length > 0,
+    "the model option list is non-empty",
+  );
 });
 
 test("a fresh session adopts the engine's spawn-generated sessionId as its key", async (t) => {
