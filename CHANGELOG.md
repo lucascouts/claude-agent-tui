@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [Unreleased]
+
 ## [0.1.0] - 2026-06-12
 
 ### Added
@@ -25,4 +27,5 @@ This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://gith
 
 - Upstream vitest suite; the regression suite now runs under `node --test` (`npm test`).
 
+[Unreleased]: https://github.com/lucascouts/claude-agent-tui/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/lucascouts/claude-agent-tui/releases/tag/v0.1.0
