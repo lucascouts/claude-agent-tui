@@ -1,6 +1,6 @@
 // === SEAM(011): engine boundary — temporary no-op stub ===
 // Story 011 inserts a TEMPORARY no-op engine at the reuse/rewrite seam mapped by
-// story 010 (fork/SEAM-MAP.md): the SDK-coupled `createSession()` + the ~590-line
+// story 010 (SEAM-MAP.md): the SDK-coupled `createSession()` + the ~590-line
 // `prompt()` loop are CUT (→ story 023, the core rewrite). This module lets the ACP
 // agent boot end-to-end WITHOUT the credit-billing SDK `query()` path while the real
 // PTY + JSONL-tail engine is built in stories 013–015/023.
@@ -13,7 +13,7 @@
 
 /**
  * The engine boundary the ACP layer delegates session/turn work to. The methods
- * mirror the CUT symbols in fork/SEAM-MAP.md (`createSession`, `prompt` → 023). The
+ * mirror the CUT symbols in SEAM-MAP.md (`createSession`, `prompt` → 023). The
  * real implementation (PTY spawn + JSONL tail) arrives in 013–015/023; story 011
  * ships only this contract plus the no-op stub below. Params/returns are `unknown`
  * on purpose — the concrete shapes are defined by the 023 rewrite, not pinned here.

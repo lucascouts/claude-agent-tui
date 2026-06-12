@@ -5,7 +5,7 @@
 // This is the over-the-wire regression GUARD for the FORK.md "Zed client-compat verdicts" #2 verdict
 // (RAW `tool_use.id` reuse accepted — the §7 reuse contract stories 017-021 assume, and which the
 // live-Zed probe confirmed): the fork uses the DEFAULT non-namespaced `toolCallIdFor(toolUseId,
-// sessionId)` path (fork/src/tools.ts), so `toolCallId` on the wire is the verbatim `toolu_X`, never a
+// sessionId)` path (src/tools.ts), so `toolCallId` on the wire is the verbatim `toolu_X`, never a
 // `${sessionId}:${toolUseId}` synthetic. We plant a transcript whose assistant emits a `tool_use`
 // (id `toolu_X`, a `Bash` round-trip) and whose next user turn carries the matching `tool_result`
 // (same `tool_use_id`); drive the replay-only `session/load` over the genuine transport; and assert

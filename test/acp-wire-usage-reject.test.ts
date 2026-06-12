@@ -18,7 +18,7 @@
 // Resilience over the wire therefore comes from the NOTIFICATION SEMANTICS (fire-and-forget) + the
 // non-blocking receive loop — NOT from the R8 catch-and-suppress LATCH. The R8 latch is the
 // IN-PROCESS protection (catch the client rejection, latch usage off for the session, keep the
-// surrounding stream flowing); that is proven in-process by `fork/test/usage-reject.test.ts` (which
+// surrounding stream flowing); that is proven in-process by `test/usage-reject.test.ts` (which
 // asserts only ONE usage_update is attempted before the latch trips). This wire test is the
 // deliberate CONTRAST: it asserts the honest non-suppression (BOTH usage_update emitted, N=2) and
 // that the stream survives a rejecting client over the real transport — closing story-025 probe 3.3.

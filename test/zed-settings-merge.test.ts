@@ -11,7 +11,7 @@ import { buildZedAgentEntry, mergeAgentServer, parseJsonc } from "../dist/zed-re
 // LEFT EMPTY (R6.2 — billing sanitization is internal to the spawn, story 013/Task 2.1).
 // Zed settings are JSONC (comments + trailing commas), so parseJsonc tolerates both.
 
-const ABS = "/home/otaku/Projetos/Pessoais/zed/agent-painel-ui/fork/dist/index.js";
+const ABS = "/home/user/claude-agent-tui/dist/index.js";
 
 const FIXTURE = `{
   // user's own settings — must survive the merge untouched

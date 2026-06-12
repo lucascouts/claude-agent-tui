@@ -3,12 +3,17 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      # Check for updates to GitHub Actions every week
       interval: "weekly"
+    # Supply-chain cooldown: don't propose a release published < 7 days ago.
+    cooldown:
+      default-days: 7
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: "weekly"
+    # Supply-chain cooldown: don't propose a release published < 7 days ago.
+    cooldown:
+      default-days: 7
     allow:
       - dependency-type: "all"
     groups:

@@ -1,6 +1,6 @@
 // Story 036 / Task 1.1 (R1.1, R1.2, R1.3, R1.4) — the all-types fixture corpus + sanitization guard.
 //
-// This is a CONSOLIDATION test: it asserts the sanitized JSONL corpus under fork/test/fixtures/
+// This is a CONSOLIDATION test: it asserts the sanitized JSONL corpus under test/fixtures/
 // covers the §16 breadth (≥14 distinct event types + all 5 content block types), includes a sidechain
 // branch and a content string-vs-array pair, PRESERVES the pre-existing multi-turn.jsonl/no-signal.jsonl
 // (R1.4), and that NO fixture line leaks a real cwd / absolute user path (R1.3). It authors no

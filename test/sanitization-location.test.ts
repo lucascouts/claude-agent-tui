@@ -15,7 +15,7 @@ import { buildZedAgentEntry } from "../dist/zed-register.js";
 // (a) the built Zed entry's env is empty, and (b) the spawn-side builder removes all
 // four SDK/billing vars — and names the spawn as the single source of truth.
 
-const ABS = "/home/otaku/Projetos/Pessoais/zed/agent-painel-ui/fork/dist/index.js";
+const ABS = "/home/user/claude-agent-tui/dist/index.js";
 
 // --- R6.2: the Zed entry leaves env empty — no scrubbing happens in Zed's env block --
 

@@ -95,7 +95,7 @@ test("projectEvent: per-type extras passed through when PRESENT on the input (de
     ...assistantFixture(),
     requestId: "req_assistant_42",
     parentUuid: "parent-uuid-7",
-    cwd: "/home/otaku/project",
+    cwd: "/home/user/project",
     gitBranch: "main",
     version: "2.1.159",
     isSidechain: false,
@@ -104,7 +104,7 @@ test("projectEvent: per-type extras passed through when PRESENT on the input (de
   const a = projectEvent(assistantWithExtras);
   assert.equal(a.requestId, "req_assistant_42");
   assert.equal(a.parentUuid, "parent-uuid-7");
-  assert.equal(a.cwd, "/home/otaku/project");
+  assert.equal(a.cwd, "/home/user/project");
   assert.equal(a.gitBranch, "main");
   assert.equal(a.version, "2.1.159");
   assert.equal(a.isSidechain, false);

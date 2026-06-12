@@ -76,7 +76,7 @@ import {
 import { nodeToWebReadable, nodeToWebWritable, unreachable } from "./utils.js";
 // === SEAM(011): engine boundary — inject a temporary no-op engine so the agent
 // boots without the cut SDK query() path; the real PTY engine arrives in 013–015/023.
-// See fork/SEAM-MAP.md (createSession/prompt CUT→023) and src/engine.ts. ===
+// See SEAM-MAP.md (createSession/prompt CUT→023) and src/engine.ts. ===
 import { type Engine, createStubEngine } from "./engine.js";
 // === SEAM(023) Group 1: the real PTY + JSONL-tail engine wiring for createSession.
 // createSession spawns the subscription `claude` TUI under a PTY (story 013) managed by a
@@ -675,7 +675,7 @@ export type ToolUseCache = {
 // spawns the subscription `claude` through the login shell (`bash -lc 'claude …'`), so it resolves
 // from PATH — the same E1 keystone (experiments/DEGRAU0-RESULTS.md), via the shell rather than an
 // explicit resolveClaudePath() call here. resolveClaudePath() (story 012) is retained for the
-// `--cli` auth spawn in index.ts. See fork/src/claude-path.ts, fork/SEAM-MAP.md, IMPLEMENTACAO §3/§5. ===
+// `--cli` auth spawn in index.ts. See src/claude-path.ts, SEAM-MAP.md, IMPLEMENTACAO §3/§5. ===
 
 function shouldHideClaudeAuth(): boolean {
   return process.argv.includes("--hide-claude-auth");
@@ -865,7 +865,7 @@ export class ClaudeAcpAgent implements Agent {
   gatewayAuthRequest?: GatewayAuthRequest;
   // === SEAM(011): the injected engine — a no-op stub by default (READ-ONLY Degrau 1);
   // the PTY + JSONL-tail engine replaces the default in 013–015/023. `initialize`
-  // does NOT touch this field (story 011 Task 1.2). See fork/SEAM-MAP.md. ===
+  // does NOT touch this field (story 011 Task 1.2). See SEAM-MAP.md. ===
   engine: Engine;
   // === SEAM(023) Group 1: the createSession PTY-engine start seam. Defaults to the production
   // wiring (defaultStartEngine: PTY spawn + JSONL watcher + transcript discovery); tests inject a

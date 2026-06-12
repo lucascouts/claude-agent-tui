@@ -130,7 +130,7 @@ test("per-line: the first-seen tool_use maps to a tool_call keyed by tool_use.id
 // === R4.2 — the sidechain parentUuid graph linearizes to the story-017 reference ================
 
 test("the story-017 reference transcript linearizes to its recorded expected order (R4.2)", async () => {
-  // The story-017 reference lives at fork/fixtures/ (the linearization owner's authoritative location).
+  // The story-017 reference lives at fixtures/ (the linearization owner's authoritative location).
   const refUrl = new URL("../fixtures/lin-task-sidechain.jsonl", import.meta.url);
   const expUrl = new URL("../fixtures/lin-task-sidechain.expected.json", import.meta.url);
   const messages = loadJsonl(refUrl);

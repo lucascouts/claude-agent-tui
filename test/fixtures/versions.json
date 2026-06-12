@@ -16,7 +16,7 @@
       "version": "2.1.159",
       "path": "v2.1.159/session.jsonl",
       "synthetic": true,
-      "basis": "Synthesized to be FAITHFUL to the documented 2.1.159 format + §10 entrypoint taxonomy — the binary the fork (fork/src/billing/) was reverse-engineered against. Real transcripts are non-committable user projects (cf. the story-017 reference fixture header).",
+      "basis": "Synthesized to be FAITHFUL to the documented 2.1.159 format + §10 entrypoint taxonomy — the binary the fork (src/billing/) was reverse-engineered against. Real transcripts are non-committable user projects (cf. the story-017 reference fixture header).",
       "entrypoint": "cli",
       "driftNotes": [
         "entrypoint='cli' is in the §10 SUBSCRIPTION_ENTRYPOINTS set (subscription billing).",

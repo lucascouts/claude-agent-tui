@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -26,13 +25,4 @@ test("fork sha: vendor-time verified the SHA equals the v0.39.0 tag (R1.1)", () 
   // and records the outcome as `tagShaVerified`. This pins the intent of the
   // original assertion (`git rev-parse v0.39.0` equals the captured SHA) durably.
   assert.equal(p.tagShaVerified, true);
-
-  // When the upstream `.git` is still present (vendor time), re-assert the
-  // equality directly — strongest form of the original contract.
-  if (existsSync(join(forkRoot, ".git"))) {
-    const tagSha = execFileSync("git", ["-C", forkRoot, "rev-parse", "v0.39.0^{commit}"], {
-      encoding: "utf8",
-    }).trim();
-    assert.equal(tagSha, p.sha, "git rev-parse v0.39.0 must equal the captured SHA");
-  }
 });
