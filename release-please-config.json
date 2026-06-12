@@ -6,7 +6,21 @@
       "changelog-path": "CHANGELOG.md",
       "release-type": "node",
       "bump-minor-pre-major": true,
-      "bump-patch-for-minor-pre-major": true
+      "bump-patch-for-minor-pre-major": true,
+      "changelog-sections": [
+        { "type": "feat", "section": "Added" },
+        { "type": "fix", "section": "Fixed" },
+        { "type": "perf", "section": "Changed" },
+        { "type": "refactor", "section": "Changed" },
+        { "type": "deps", "section": "Changed" },
+        { "type": "revert", "section": "Changed" },
+        { "type": "docs", "section": "Documentation", "hidden": false },
+        { "type": "chore", "section": "Infrastructure", "hidden": false },
+        { "type": "ci", "section": "Infrastructure", "hidden": false },
+        { "type": "build", "section": "Infrastructure", "hidden": false },
+        { "type": "style", "section": "Infrastructure", "hidden": true },
+        { "type": "test", "section": "Infrastructure", "hidden": true }
+      ]
     }
   },
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
