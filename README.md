@@ -1,0 +1,50 @@
+# claude-agent-tui
+
+[![npm](https://img.shields.io/npm/v/@lucascouts/claude-agent-tui)](https://www.npmjs.com/package/@lucascouts/claude-agent-tui)
+
+An [ACP](https://agentclientprotocol.com)-compatible agent that drives the **Claude Code subscription TUI** over a PTY, so your Claude Code threads render natively in [Zed](https://zed.dev) and other ACP clients.
+
+> **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
+
+## Requirements
+
+- The **`claude` CLI** (Claude Code subscription) available on your `PATH`.
+- **Node.js ≥ 23** — the runtime and test suite use native TypeScript type-stripping.
+
+## Register in Zed
+
+Build the agent, then point Zed's `agent_servers` at the built entrypoint:
+
+```jsonc
+// ~/.config/zed/settings.json
+{
+  "agent_servers": {
+    "Claude Agent TUI": {
+      "type": "custom",
+      "command": "node",
+      "args": ["/absolute/path/to/claude-agent-tui/dist/index.js"],
+      "env": {}
+    }
+  }
+}
+```
+
+Open the Agent Panel in Zed and select **Claude Agent TUI**.
+
+## Build & test
+
+```sh
+npm install
+npm run build
+npm test
+```
+
+## Capabilities
+
+- Renders Claude Code threads: text, thinking, tool calls, structured diffs, TODO plans, and nested sub-agents
+- Token-usage updates
+- Prompt input, cancellation, and session load/replay
+
+## License
+
+[Apache-2.0](LICENSE). This is a derivative work; original copyright belongs to Zed Industries and the Agent Client Protocol authors.

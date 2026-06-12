@@ -1,0 +1,27 @@
+{
+  "_comment": "Story 036 §16 — per-binary-version fixture index. Maps each claude binary version label to its corpus path + HONEST provenance. See CORPUS.md. Drift between the two sets is exercised by the regression harness (regression-harness.test.ts) and logged non-fatally (R3.2).",
+  "versions": [
+    {
+      "version": "2.1.121",
+      "path": "v2.1.121/session.jsonl",
+      "synthetic": true,
+      "basis": "Synthesized from the documented 2.1.121->2.1.159 format/taxonomy differences (IMPLEMENTACAO-FORK-ACP.md §16/§10). No real 2.1.121 capture exists in this repo; this set is DERIVED, not a real binary capture.",
+      "entrypoint": "claude-cli",
+      "driftNotes": [
+        "entrypoint-taxonomy drift: billable events carry the older 'claude-cli' label, which is NOT in the §10 SUBSCRIPTION_ENTRYPOINTS set (frozen for 2.1.159); the modern set uses 'cli'.",
+        "JSONL-format drift: a simple text turn carries message.content as a bare STRING (string-vs-array ambiguity), where the 2.1.159 set carries an ARRAY of blocks for the equivalent turn."
+      ]
+    },
+    {
+      "version": "2.1.159",
+      "path": "v2.1.159/session.jsonl",
+      "synthetic": true,
+      "basis": "Synthesized to be FAITHFUL to the documented 2.1.159 format + §10 entrypoint taxonomy — the binary the fork (fork/src/billing/) was reverse-engineered against. Real transcripts are non-committable user projects (cf. the story-017 reference fixture header).",
+      "entrypoint": "cli",
+      "driftNotes": [
+        "entrypoint='cli' is in the §10 SUBSCRIPTION_ENTRYPOINTS set (subscription billing).",
+        "message.content for a text turn is an ARRAY of content blocks (the modern shape)."
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+node_modules
+dist
+.agent-shell
+
+.release-please-manifest.json
+release-please-config.json
+CHANGELOG.md
+
+# Test suites follow the node:test layout; the enforced formatting gate is `eslint src`.
+# test/ is left unformatted by convention, so keep prettier from flagging it.
+**/*.test.ts

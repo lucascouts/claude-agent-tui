@@ -1,0 +1,29 @@
+[
+  {
+    "orderKey": "00000000:u1",
+    "uuid": "u1",
+    "role": "user",
+    "nested": []
+  },
+  {
+    "orderKey": "00000001:a1",
+    "uuid": "a1",
+    "role": "assistant",
+    "nested": [
+      "side1",
+      "side2"
+    ]
+  },
+  {
+    "orderKey": "00000002:u2",
+    "uuid": "u2",
+    "role": "user",
+    "nested": []
+  },
+  {
+    "orderKey": "00000003:a2",
+    "uuid": "a2",
+    "role": "assistant",
+    "nested": []
+  }
+]

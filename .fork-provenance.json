@@ -1,0 +1,58 @@
+{
+  "url": "https://github.com/agentclientprotocol/claude-agent-acp.git",
+  "org": "agentclientprotocol/claude-agent-acp",
+  "redirectFrom": "zed-industries/claude-code-acp",
+  "tag": "v0.39.0",
+  "sha": "edde96ebafac2ea5d1c879c17459453472d82916",
+  "tagShaVerified": true,
+  "upstreamDependencyKeys": [
+    "@agentclientprotocol/sdk",
+    "@anthropic-ai/claude-agent-sdk",
+    "zod"
+  ],
+  "externalRuntimeDeps": [
+    {
+      "name": "claude",
+      "version": "2.1.159",
+      "resolvedFrom": "PATH",
+      "npm": false,
+      "note": "The claude TUI binary is an EXTERNAL runtime dependency resolved from the user's PATH, NOT an npm dependency. The PTY engine (story 013) spawns it."
+    }
+  ],
+  "openTodos": [
+    {
+      "tag": "🧪",
+      "topic": "confirm-zed-version",
+      "note": "Confirm the user's installed Zed version. The user's Zed protocolVersion and its tolerance of UNSTABLE fields (e.g. usage_update) are unverified (§15).",
+      "deferredTo": "story 025"
+    }
+  ],
+  "anchorRule": "anchor by symbol NAME, not line number — upstream line numbers are volatile (createSession ≈L1933/L2037, canUseTool ≈L1600/L1704, prompt ≈L732/L900)",
+  "modules": [
+    "index.ts",
+    "acp-agent.ts",
+    "tools.ts",
+    "settings.ts",
+    "utils.ts",
+    "lib.ts"
+  ],
+  "symbolInventory": {
+    "acp-agent.ts": [
+      "createSession",
+      "prompt",
+      "canUseTool",
+      "toAcpNotifications",
+      "streamEventToAcpNotifications",
+      "replaySessionHistory",
+      "runAcp",
+      "initialize"
+    ],
+    "tools.ts": [
+      "toolInfoFromToolUse",
+      "toolUpdateFromToolResult",
+      "toolUpdateFromDiffToolResponse",
+      "planEntries",
+      "taskStateToPlanEntries"
+    ]
+  }
+}

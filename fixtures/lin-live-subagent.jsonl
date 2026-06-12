@@ -1,0 +1,7 @@
+{"type":"user","uuid":"u1","session_id":"sess-live","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"text","text":"investigate and fix module X"}]}}
+{"type":"assistant","uuid":"a1","session_id":"sess-live","parent_tool_use_id":null,"message":{"role":"assistant","content":[{"type":"text","text":"Spawning a subagent."},{"type":"tool_use","id":"toolu_task_1","name":"Task","input":{"description":"investigate X"}}]}}
+{"type":"assistant","uuid":"sb-z2","session_id":"sess-live","parent_tool_use_id":"toolu_task_1","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent step two"}]}}
+{"type":"assistant","uuid":"sb-a1","session_id":"sess-live","parent_tool_use_id":"toolu_task_1","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent step one"}]}}
+{"type":"assistant","uuid":"orphan1","session_id":"sess-live","parent_tool_use_id":"toolu_missing_99","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"orphan subagent row whose parent was never seen"}]}}
+{"type":"user","uuid":"u2","session_id":"sess-live","parent_tool_use_id":null,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task_1","content":"subagent done"}]}}
+{"type":"assistant","uuid":"a2","session_id":"sess-live","parent_tool_use_id":null,"message":{"role":"assistant","content":[{"type":"text","text":"Done. Module X fixed."}]}}
