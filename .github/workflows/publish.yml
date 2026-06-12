@@ -1,0 +1,49 @@
+name: Release and Publish
+
+on:
+  push:
+    branches:
+      - main
+
+# Least privilege by default; each job opts into exactly what it needs.
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create release commit/tag
+      pull-requests: write # open/maintain the release PR
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Uses the default GITHUB_TOKEN (no GitHub App needed); the publish job runs
+      # in the SAME workflow run via `needs`, so it is not blocked by the
+      # "token-created events don't trigger workflows" rule.
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v4.1.3
+        id: release
+        with:
+          release-type: node
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+      id-token: write # OIDC for npm trusted publishing + provenance attestation
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.1.6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.3
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      # npm >= 11.5 is required for OIDC trusted publishing.
+      - run: npm install -g npm@latest
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
