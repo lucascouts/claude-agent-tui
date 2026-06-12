@@ -1,13 +1,31 @@
 # Changelog
 
-## 0.1.0
+All notable changes to claude-agent-tui will be documented in this file.
 
-Initial public release.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Forked from [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) **v0.39.0** (see [`.fork-provenance.json`](.fork-provenance.json) for the exact commit).
+This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
-### Changed from upstream
+## [Unreleased]
 
-- The engine drives the **Claude Code subscription TUI over a PTY** instead of calling the Claude Agent SDK, translating the JSONL transcript into ACP `session/update` notifications.
-- Reports `agentInfo.title` as **"Claude Agent TUI"**.
-- Dropped the upstream vitest suite; the regression suite runs under `node --test` (`npm test`).
+## [0.1.0] - 2026-06-12
+
+### Added
+
+- ACP agent that drives the **Claude Code subscription TUI over a PTY**, rendering Claude Code threads in Zed and other ACP-compatible clients.
+- Rendering of text, thinking, tool calls, structured diffs, TODO plans, and nested sub-agents.
+- Token-usage updates, prompt input, cancellation, and session load/replay.
+- `NOTICE` file with upstream attribution (Apache-2.0 derivative work).
+
+### Changed
+
+- **Engine rewrite**: spawns the `claude` subscription CLI in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications, instead of calling the Claude Agent SDK.
+- `agentInfo.title` is reported as **"Claude Agent TUI"**.
+
+### Removed
+
+- Upstream vitest suite; the regression suite now runs under `node --test` (`npm test`).
+
+[Unreleased]: https://github.com/lucascouts/claude-agent-tui/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/lucascouts/claude-agent-tui/releases/tag/v0.1.0
