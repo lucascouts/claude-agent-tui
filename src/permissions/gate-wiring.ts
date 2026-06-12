@@ -34,11 +34,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { findFreePort } from "../gate/port.js";
 import { injectHook, restore, type Backup } from "../gate/settings-writer.js";
-import {
-  startHookServer,
-  type ForwardedToolCall,
-  type HookServer,
-} from "./hook-server.js";
+import { startHookServer, type ForwardedToolCall, type HookServer } from "./hook-server.js";
 import {
   requestPermission,
   ToolUseCorrelator,

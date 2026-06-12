@@ -1,8 +1,8 @@
 # LINEARIZATION.md — tree → ordered turns (story 017)
 
-How the fork turns a `<sessionId>.jsonl` transcript *tree* (`uuid` ← `parentUuid`, with
+How the fork turns a `<sessionId>.jsonl` transcript _tree_ (`uuid` ← `parentUuid`, with
 `isSidechain` subagent branches, forks, re-prompts, and a post-`/compact` `summary` anchor) into the
-single *linear* turn order Zed's Agent Panel consumes. Implemented in `src/linearize.ts`; consumed by
+single _linear_ turn order Zed's Agent Panel consumes. Implemented in `src/linearize.ts`; consumed by
 the §7 translator (stories 018–021) and the `session/load` replay (stories 011/023).
 
 ## 1. Source of the order — reuse `getSessionMessages` (do not write a parser)
@@ -36,7 +36,7 @@ agentId)`; those rows carry `isSidechain: true` and correlate by **`agentId`** (
 
 - **Order key** is uuid-anchored by **monotonic array position** (`chainPositionKey(uuid, index)`),
   not by `parentUuid` (absent live). The E5 monotonic-ordered-**superset** property makes a prefix
-  re-parse keep every prior position, so a turn at order *k* stays *k* after appends (R3.1/R3.2):
+  re-parse keep every prior position, so a turn at order _k_ stays _k_ after appends (R3.1/R3.2):
   prior `orderKey`s are never reshuffled, re-keyed, or re-emitted.
 - **Sidechain detection**: `isSidechain` when a raw/fallback row carries it, else inferred from a
   non-null `parent_tool_use_id`. On the pure live path there are no sidechain rows to detect, so the
@@ -55,7 +55,7 @@ count equals the main-chain count.
 - `applySidechainPolicy(messages, policy)` → `{ topLevel, nestedByToolUseId }`.
 - `linearizeTurns` attaches resolved children to the spawning parent turn via `Turn.nested`.
 
-Rationale: subagent runs are *caused by* a main-chain `tool_use`; nesting preserves causality and
+Rationale: subagent runs are _caused by_ a main-chain `tool_use`; nesting preserves causality and
 matches how the translator attaches tool lifecycle by `toolCallId`. Alternatives are selectable and
 leave the main-turn order untouched (R2.3 — the main-turn subsequence is byte-identical across all
 three): **`hidden`** drops sidechains (loses subagent visibility); **`inline`** merges them in

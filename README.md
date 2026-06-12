@@ -23,9 +23,9 @@ Build the agent, then point Zed's `agent_servers` at the built entrypoint:
       "type": "custom",
       "command": "node",
       "args": ["/absolute/path/to/claude-agent-tui/dist/index.js"],
-      "env": {}
-    }
-  }
+      "env": {},
+    },
+  },
 }
 ```
 

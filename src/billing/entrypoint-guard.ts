@@ -53,12 +53,7 @@ export const SUBSCRIPTION_ENTRYPOINTS = [
  * §10 CREDIT set (ABORT) — client labels that bill on API credit (Agent SDK / headless `-p`).
  * Source: doc §10, `claude` binary 2.1.159.
  */
-export const CREDIT_ENTRYPOINTS = [
-  "sdk-ts",
-  "sdk-py",
-  "sdk-cli",
-  "print",
-] as const;
+export const CREDIT_ENTRYPOINTS = ["sdk-ts", "sdk-py", "sdk-cli", "print"] as const;
 
 export type EntrypointClass = "subscription" | "credit" | "unknown";
 
@@ -162,7 +157,11 @@ export interface GuardHooks {
   /** Loud, unambiguous alert sink. The message MUST carry the offending entrypoint value AND session id. */
   alert(message: string): void;
   /** Stop the session (wired to engine-lifecycle stop in story 023). Invoked once per violation. */
-  stopSession(info: { entrypoint: string; sessionId?: string; entrypointClass: "credit" | "unknown" }): void;
+  stopSession(info: {
+    entrypoint: string;
+    sessionId?: string;
+    entrypointClass: "credit" | "unknown";
+  }): void;
 }
 
 /**

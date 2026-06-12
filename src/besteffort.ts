@@ -29,10 +29,7 @@
 //     `opts.translate = () => { throw … }`, proving the core stream survives a convenience failure.
 import { type AgentSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
 import { type ContentBlockParam } from "@anthropic-ai/sdk/resources";
-import {
-  BetaContentBlock,
-  BetaRawContentBlockDelta,
-} from "@anthropic-ai/sdk/resources/beta.mjs";
+import { BetaContentBlock, BetaRawContentBlockDelta } from "@anthropic-ai/sdk/resources/beta.mjs";
 import { toAcpNotifications, type Logger, type ToolUseCache } from "./acp-agent.js";
 
 /**
@@ -52,10 +49,7 @@ export interface ConvenienceFlags {
  * Everything else (text, thinking, other tool_use, tool_result, …) is CORE.
  */
 export function isConvenienceBlock(block: any): boolean {
-  return (
-    block?.type === "image" ||
-    (block?.type === "tool_use" && block?.name === "TodoWrite")
-  );
+  return block?.type === "image" || (block?.type === "tool_use" && block?.name === "TodoWrite");
 }
 
 type ContentBlock = ContentBlockParam | BetaContentBlock | BetaRawContentBlockDelta;
@@ -66,9 +60,10 @@ type TranslateFn = typeof toAcpNotifications;
  * string `content` (the bare-string `toAcpNotifications` fast-path) has no per-block convenience
  * surface, so it is treated wholly as CORE (returned via the core subset, empty convenience subset).
  */
-function partitionBlocks(
-  content: string | ContentBlock[],
-): { core: string | ContentBlock[]; convenience: ContentBlock[] } {
+function partitionBlocks(content: string | ContentBlock[]): {
+  core: string | ContentBlock[];
+  convenience: ContentBlock[];
+} {
   if (typeof content === "string" || !Array.isArray(content)) {
     return { core: content, convenience: [] };
   }

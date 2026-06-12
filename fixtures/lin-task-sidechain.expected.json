@@ -9,10 +9,7 @@
     "orderKey": "00000001:a1",
     "uuid": "a1",
     "role": "assistant",
-    "nested": [
-      "side1",
-      "side2"
-    ]
+    "nested": ["side1", "side2"]
   },
   {
     "orderKey": "00000002:u2",

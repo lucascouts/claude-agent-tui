@@ -116,7 +116,12 @@ function isString(value: unknown): value is string {
 }
 
 /** The explicit diff-producing tool names (besides the `mcp__` prefix, handled in {@link isDiffBearingName}). */
-const DIFF_BEARING_NAMES: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+const DIFF_BEARING_NAMES: ReadonlySet<string> = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+]);
 
 /**
  * True when `name` denotes a diff-producing tool (Task 3.2). A contentless payload from such a tool is
@@ -172,7 +177,10 @@ export function classifyDiffSource(name: string | undefined, toolUseResult: unkn
   // `file-history-snapshot`, name `undefined`) is the silent `not-a-diff-source` (Task 1.1).
   if (!hasStructuredPatch && !hasContent && !hasOriginalFile) {
     return isDiffBearingName(name)
-      ? skipAndLog(name, "diff-bearing tool produced no usable structuredPatch/originalFile/content")
+      ? skipAndLog(
+          name,
+          "diff-bearing tool produced no usable structuredPatch/originalFile/content",
+        )
       : NOT_A_DIFF_SOURCE;
   }
 

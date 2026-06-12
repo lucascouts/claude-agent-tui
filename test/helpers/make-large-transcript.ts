@@ -63,7 +63,10 @@ export interface MakeLargeTranscriptOptions {
  * @param opts `toolEvery` cadence (default 50).
  * @returns the `{ messages, expected }` pair.
  */
-export function makeLargeTranscript(n: number, opts: MakeLargeTranscriptOptions = {}): LargeTranscript {
+export function makeLargeTranscript(
+  n: number,
+  opts: MakeLargeTranscriptOptions = {},
+): LargeTranscript {
   const toolEvery = opts.toolEvery ?? 50;
   if (!Number.isInteger(n) || n < 0) {
     throw new Error(`makeLargeTranscript: n must be a non-negative integer; got ${n}`);
@@ -110,9 +113,7 @@ export function makeLargeTranscript(n: number, opts: MakeLargeTranscriptOptions 
         },
       });
       expected.push(
-        isAssistant
-          ? { kind: "agent_message_chunk", text }
-          : { kind: "user_message_chunk", text },
+        isAssistant ? { kind: "agent_message_chunk", text } : { kind: "user_message_chunk", text },
       );
     }
   }

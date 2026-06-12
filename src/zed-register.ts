@@ -33,7 +33,9 @@ export function buildZedAgentEntry(absDistPath: string): ZedAgentEntry {
     throw new Error(`Zed agent_servers args[0] must be an ABSOLUTE path, got: ${absDistPath}`);
   }
   if (!absDistPath.endsWith("dist/index.js")) {
-    throw new Error(`Zed agent_servers args[0] must point at the built dist/index.js, got: ${absDistPath}`);
+    throw new Error(
+      `Zed agent_servers args[0] must point at the built dist/index.js, got: ${absDistPath}`,
+    );
   }
   return { type: "custom", command: "node", args: [absDistPath], env: {} };
 }

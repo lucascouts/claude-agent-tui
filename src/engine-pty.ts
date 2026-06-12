@@ -102,7 +102,11 @@ export function resolveShell(baseEnv: Record<string, string | undefined> = proce
  * Like `--permission-mode plan`, this flag changes only TUI behavior — it adds no
  * `-p`/`stream-json`, so billing stays subscription `cli` (§10).
  */
-export function buildClaudeCmd(sessionId: string, planMode?: boolean, settingsFile?: string): string {
+export function buildClaudeCmd(
+  sessionId: string,
+  planMode?: boolean,
+  settingsFile?: string,
+): string {
   let cmd = `claude --session-id ${sessionId}`;
   if (planMode) cmd += " --permission-mode plan";
   if (settingsFile) cmd += ` --settings "${settingsFile}"`;

@@ -5,11 +5,7 @@
   "tag": "v0.39.0",
   "sha": "edde96ebafac2ea5d1c879c17459453472d82916",
   "tagShaVerified": true,
-  "upstreamDependencyKeys": [
-    "@agentclientprotocol/sdk",
-    "@anthropic-ai/claude-agent-sdk",
-    "zod"
-  ],
+  "upstreamDependencyKeys": ["@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "zod"],
   "externalRuntimeDeps": [
     {
       "name": "claude",
@@ -28,14 +24,7 @@
     }
   ],
   "anchorRule": "anchor by symbol NAME, not line number — upstream line numbers are volatile (createSession ≈L1933/L2037, canUseTool ≈L1600/L1704, prompt ≈L732/L900)",
-  "modules": [
-    "index.ts",
-    "acp-agent.ts",
-    "tools.ts",
-    "settings.ts",
-    "utils.ts",
-    "lib.ts"
-  ],
+  "modules": ["index.ts", "acp-agent.ts", "tools.ts", "settings.ts", "utils.ts", "lib.ts"],
   "symbolInventory": {
     "acp-agent.ts": [
       "createSession",

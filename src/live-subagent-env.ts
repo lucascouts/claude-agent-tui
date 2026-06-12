@@ -15,6 +15,8 @@
  * explicit opt-out values "0"/"false" disable it (unset/empty/any other value → ON). Pure + testable;
  * index.ts calls this so the truth table is unit-checkable without running the entrypoint.
  */
-export function liveSubagentWatchEnabled(env: Record<string, string | undefined> = process.env): boolean {
+export function liveSubagentWatchEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
   return env.FORK_LIVE_SUBAGENT_WATCH !== "0" && env.FORK_LIVE_SUBAGENT_WATCH !== "false";
 }

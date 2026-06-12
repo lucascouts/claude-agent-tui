@@ -45,7 +45,9 @@ export interface ForwardedToolCall {
 }
 
 /** The decider the server forwards each tool call to; returns the enforced `'allow'`/`'deny'`. */
-export type ToolCallDecider = (call: ForwardedToolCall) => Promise<"allow" | "deny"> | "allow" | "deny";
+export type ToolCallDecider = (
+  call: ForwardedToolCall,
+) => Promise<"allow" | "deny"> | "allow" | "deny";
 
 /** The running hook server handle. */
 export interface HookServer {

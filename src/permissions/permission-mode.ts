@@ -111,7 +111,9 @@ export function assertEntrypointCli(event: WatchedMessage): EntrypointAssertion 
   const aborted = captured[0] ?? null;
   if (decision.action === "abort" || aborted !== null) {
     const ep = aborted?.entrypoint ?? (decision.action === "abort" ? decision.entrypoint : "");
-    const cls = aborted?.entrypointClass ?? (decision.action === "abort" ? decision.entrypointClass : "unknown");
+    const cls =
+      aborted?.entrypointClass ??
+      (decision.action === "abort" ? decision.entrypointClass : "unknown");
     return {
       ok: false,
       entrypoint: ep,

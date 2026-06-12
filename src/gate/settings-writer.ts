@@ -65,7 +65,10 @@ export interface PreToolUseGroup {
  * @throws {Error} if `port` is not a positive integer (a bad port would produce a malformed/ungated
  *   hook — fail loud rather than silently emit a hook claude ignores).
  */
-export function buildHookEntry(port: number, timeout: number = DEFAULT_HOOK_TIMEOUT_SECONDS): PreToolUseGroup {
+export function buildHookEntry(
+  port: number,
+  timeout: number = DEFAULT_HOOK_TIMEOUT_SECONDS,
+): PreToolUseGroup {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(
       `buildHookEntry: port must be a positive integer in 1..65535, got ${String(port)} — refusing ` +
@@ -102,7 +105,7 @@ export function isForkHookGroup(group: unknown): boolean {
         h !== null &&
         typeof h === "object" &&
         typeof (h as { url?: unknown }).url === "string" &&
-        ((h as { url: string }).url.includes(FORK_HOOK_MARKER_PATH))
+        (h as { url: string }).url.includes(FORK_HOOK_MARKER_PATH)
       ) {
         return true;
       }
@@ -172,7 +175,9 @@ export function parsePriorSettings(text: string): SettingsLike {
   try {
     const parsed = parseJsonc(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`parsed root is ${Array.isArray(parsed) ? "an array" : typeof parsed}, expected an object`);
+      throw new Error(
+        `parsed root is ${Array.isArray(parsed) ? "an array" : typeof parsed}, expected an object`,
+      );
     }
     return parsed as SettingsLike;
   } catch (err) {

@@ -283,10 +283,7 @@ export function applySidechainPolicy(
  * @param opts flattening-policy + orphan-drift options (`nested` default).
  * @returns the ordered top-level `Turn[]`.
  */
-export function linearizeTurns(
-  messages: SessionMessage[],
-  opts: LinearizeOptions = {},
-): Turn[] {
+export function linearizeTurns(messages: SessionMessage[], opts: LinearizeOptions = {}): Turn[] {
   const policy = opts.sidechainPolicy ?? "nested";
   const { topLevel, nestedByToolUseId } = applySidechainPolicy(messages, policy, {
     onDrift: opts.onDrift,
