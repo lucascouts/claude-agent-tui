@@ -32,8 +32,6 @@ This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://gith
 
 * **lint:** clear 10 eslint errors in src (no-undef, cause, default-case, const) ([617a2f5](https://github.com/lucascouts/claude-agent-tui/commit/617a2f5cfef722ba9e056b640f307bb00227883e))
 
-## [Unreleased]
-
 ## [0.1.0] - 2026-06-12
 
 ### Added
@@ -52,5 +50,4 @@ This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://gith
 
 - Upstream vitest suite; the regression suite now runs under `node --test` (`npm test`).
 
-[Unreleased]: https://github.com/lucascouts/claude-agent-tui/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/lucascouts/claude-agent-tui/releases/tag/v0.1.0
