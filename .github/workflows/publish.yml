@@ -47,3 +47,44 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm publish --provenance --access public
+
+  bundle-gentoo:
+    name: Build and attach Gentoo bundle
+    runs-on: ubuntu-latest
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write # upload the prebuilt bundle as a release asset
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v4.1.6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.3
+        with:
+          node-version: "24"
+      # Build dist/ (needs devDeps), then reinstall production-only so the
+      # bundle ships dist/ + a runtime node_modules with the native node-pty.
+      - run: npm ci
+      - run: npm run build
+      - name: Production node_modules with native node-pty
+        run: |
+          rm -rf node_modules
+          npm ci --omit=dev
+          # Compile the native addon explicitly and fail the job if it is absent,
+          # so a broken bundle is never attached to the release.
+          npm rebuild node-pty
+          test -f node_modules/node-pty/build/Release/pty.node
+      - name: Assemble deterministic tarball
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          ver="${TAG_NAME#v}"
+          pkg="claude-agent-tui-${ver}"
+          mkdir "${pkg}"
+          cp -r dist node_modules package.json LICENSE NOTICE README.md "${pkg}/"
+          tar --sort=name --mtime='2020-01-01 00:00:00' \
+              --owner=0 --group=0 --numeric-owner \
+              -czf "${pkg}.tar.gz" "${pkg}"
+      - name: Attach to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "${TAG_NAME}" claude-agent-tui-*.tar.gz --clobber
