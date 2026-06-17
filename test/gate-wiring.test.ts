@@ -81,12 +81,17 @@ function post(port: number, body: string): Promise<{ status: number; json: any }
 
 /** A fixture PreToolUse payload (GATE_FINDINGS keystone 1.3 shape). The `session_id` is the TUI's
  *  own id, DELIBERATELY different from the ACP session id — the bound (authoritative) id must win. */
-function fixturePayload(toolUseId: string, toolName = "Bash", toolInput: unknown = { command: "rm -rf /" }): string {
+function fixturePayload(
+  toolUseId: string,
+  toolName = "Bash",
+  toolInput: unknown = { command: "rm -rf /" },
+  permissionMode = "default",
+): string {
   return JSON.stringify({
     session_id: "tui-side-session-id",
     transcript_path: "/tmp/x.jsonl",
     cwd: "/tmp",
-    permission_mode: "default",
+    permission_mode: permissionMode,
     hook_event_name: "PreToolUse",
     tool_name: toolName,
     tool_input: toolInput,
@@ -285,6 +290,44 @@ test("wiring (b2): an UNCORRELATED tool_use.id fails closed (deny) without ever 
 
   assert.equal(json.hookSpecificOutput.permissionDecision, "deny", "uncorrelated → deny, not approve");
   assert.equal(calls.length, 0, "no Zed prompt is raised for an uncorrelated call");
+});
+
+// === (b3) Story 046 (R3) — the decider HONORS the live permission mode before relaying to Zed ======
+// Without these branches the gate raises session/request_permission for EVERY tool, overriding the
+// panel's mode selector (the user saw a Zed prompt in every mode, even bypass). probe-d confirmed the
+// hook payload's `permission_mode` matches the selected mode.
+
+test("wiring (b3): bypassPermissions auto-allows ANY tool WITHOUT raising a Zed prompt (story 046 R3)", async (t) => {
+  const { calls, gate } = await setupGatedAgent(t, () => DENY_OPTION_ID);
+  // A dangerous Bash, and DELIBERATELY uncorrelated — the bypass short-circuit precedes both the
+  // correlation wait and the Zed relay, so it allows regardless (the explicit user choice is honored).
+  const { json } = await post(
+    gate.port,
+    fixturePayload("toolu_bypass", "Bash", { command: "rm -rf /" }, "bypassPermissions"),
+  );
+  assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "bypassPermissions auto-allows");
+  assert.equal(calls.length, 0, "bypass never raises session/request_permission (selector honored, not overridden)");
+});
+
+test("wiring (b4): acceptEdits auto-allows an EDIT-class tool WITHOUT a Zed prompt (story 046 R3)", async (t) => {
+  const { calls, gate } = await setupGatedAgent(t, () => DENY_OPTION_ID);
+  const { json } = await post(
+    gate.port,
+    fixturePayload("toolu_edit", "Write", { file_path: "/tmp/x", content: "hi" }, "acceptEdits"),
+  );
+  assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "acceptEdits auto-allows edit-class tools");
+  assert.equal(calls.length, 0, "an auto-allowed edit never prompts Zed");
+});
+
+test("wiring (b5): acceptEdits does NOT auto-allow a NON-edit tool — it still asks Zed (story 046 R3)", async (t) => {
+  const { calls, gate } = await setupGatedAgent(t, () => ALLOW_OPTION_ID);
+  gate.correlator.register("toolu_accept_bash"); // the fall-through (ask-Zed) path needs correlation
+  const { json } = await post(
+    gate.port,
+    fixturePayload("toolu_accept_bash", "Bash", { command: "ls" }, "acceptEdits"),
+  );
+  assert.equal(calls.length, 1, "a non-edit tool under acceptEdits still raises a Zed prompt (only edits auto-allow)");
+  assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "and Zed's decision is enforced on the fall-through");
 });
 
 // === (c) teardown closes the server and removes the scratch — no leak ==============================

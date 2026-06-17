@@ -81,6 +81,11 @@ const setMode = (agent: ClaudeAcpAgent, sessionId: string, modeId: string) =>
   (agent as unknown as { setSessionMode: (p: { sessionId: string; modeId: string }) => Promise<unknown> })
     .setSessionMode({ sessionId, modeId });
 
+const setOptionMode = (agent: ClaudeAcpAgent, sessionId: string, value: string) =>
+  (agent as unknown as {
+    setSessionConfigOption: (p: { sessionId: string; configId: string; value: string }) => Promise<unknown>;
+  }).setSessionConfigOption({ sessionId, configId: "mode", value });
+
 const modeCurrentValue = (
   sessions: Record<string, { configOptions: Array<{ id: string; currentValue?: unknown }> }>,
   id: string,
@@ -99,6 +104,17 @@ test("4.4 idle + dontAsk → re-spawns the SAME sessionId (key unchanged, transc
     fake.calls[fake.calls.length - 1].sessionId,
     sessionId,
     "the re-spawn must reuse the SAME sessionId (R3.4)",
+  );
+});
+
+test("Bug A: set_config_option(mode='dontAsk') re-spawns too — the path Zed uses must drive, not no-op", async (t) => {
+  const fake = makeStartEngine();
+  const { agent, sessionId } = await newSession(t, fake.startEngine);
+  // Zed sends mode changes via set_config_option(configId:"mode"); this path was read-only (Bug A).
+  await setOptionMode(agent, sessionId, "dontAsk");
+  assert.ok(
+    fake.calls.length >= 2,
+    `set_config_option(mode='dontAsk') must trigger a re-spawn like setSessionMode (Bug A), got ${fake.calls.length} calls`,
   );
 });
 
