@@ -70,7 +70,9 @@ setTimeout(() => {}, SETTLE_MS); // (settle is folded into the first interval de
 function finish() {
   const txt = strip(buf);
   const modeHints = [
-    ...txt.matchAll(/(plan mode|accept edits|accept-edits|bypass(?:ing)? permissions|auto-?accept|normal mode|default mode)/gi),
+    ...txt.matchAll(
+      /(plan mode|accept edits|accept-edits|bypass(?:ing)? permissions|auto-?accept|normal mode|default mode)/gi,
+    ),
   ].map((m) => m[0].toLowerCase());
   let permEvents = 0;
   let sampleLine = null;
@@ -83,7 +85,10 @@ function finish() {
   console.log(
     JSON.stringify(
       {
-        verdict: permEvents > 0 ? "PASS-live (transcript event observed)" : "PASS-by-corpus (no prompt-free transcript; see 138-file corpus)",
+        verdict:
+          permEvents > 0
+            ? "PASS-live (transcript event observed)"
+            : "PASS-by-corpus (no prompt-free transcript; see 138-file corpus)",
         sessionId,
         transcript,
         transcriptExists: existsSync(transcript),
@@ -108,6 +113,8 @@ setTimeout(() => {
   try {
     p.kill();
   } catch {}
-  console.log(JSON.stringify({ verdict: "TIMEOUT — fell back to PASS-by-corpus", bufBytes: buf.length }));
+  console.log(
+    JSON.stringify({ verdict: "TIMEOUT — fell back to PASS-by-corpus", bufBytes: buf.length }),
+  );
   process.exit(0);
 }, 20000);

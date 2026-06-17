@@ -31,7 +31,9 @@ mkdirSync(SESSION_CWD, { recursive: true });
 
 function withTimeout(p, ms, label) {
   let t;
-  const to = new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)));
+  const to = new Promise(
+    (_, rej) => (t = setTimeout(() => rej(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  );
   return Promise.race([p, to]).finally(() => clearTimeout(t));
 }
 
@@ -41,7 +43,24 @@ function withTimeout(p, ms, label) {
 // pump/end-of-turn/gate never fire). The fork strips only the 4 billing vars; we strip everything
 // Claude/Anthropic here, keeping just what a fresh terminal needs (incl. HOME for ~/.claude auth).
 const CLEAN_ENV = {};
-for (const k of ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TERM", "SHELL", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "WAYLAND_DISPLAY", "DISPLAY"]) {
+for (const k of [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "TERM",
+  "SHELL",
+  "TMPDIR",
+  "XDG_RUNTIME_DIR",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "WAYLAND_DISPLAY",
+  "DISPLAY",
+]) {
   if (process.env[k] !== undefined) CLEAN_ENV[k] = process.env[k];
 }
 const child = spawn(process.execPath, ["dist/index.js"], {
@@ -59,13 +78,19 @@ const toolNameOf = (params) => {
   return tc.title || tc.kind || tc.toolCallId || JSON.stringify(tc).slice(0, 40);
 };
 const client = {
-  async sessionUpdate(params) { sessionUpdates.push(params); },
+  async sessionUpdate(params) {
+    sessionUpdates.push(params);
+  },
   async requestPermission(params) {
     permissionRequests.push(params);
     return { outcome: { outcome: "selected", optionId: "allow" } }; // approve so the turn completes
   },
-  async readTextFile() { return { content: "" }; },
-  async writeTextFile() { return {}; },
+  async readTextFile() {
+    return { content: "" };
+  },
+  async writeTextFile() {
+    return {};
+  },
 };
 
 const stream = ndJsonStream(nodeToWebWritable(child.stdin), nodeToWebReadable(child.stdout));
@@ -86,23 +111,40 @@ function toolsSince(startIdx) {
 const results = [];
 try {
   await withTimeout(
-    agent.initialize({ protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } } }),
-    15000, "initialize",
+    agent.initialize({
+      protocolVersion: 1,
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+    }),
+    15000,
+    "initialize",
   );
-  const ns = await withTimeout(agent.newSession({ cwd: SESSION_CWD, mcpServers: [] }), 20000, "newSession");
+  const ns = await withTimeout(
+    agent.newSession({ cwd: SESSION_CWD, mcpServers: [] }),
+    20000,
+    "newSession",
+  );
   const sessionId = ns.sessionId;
   await delay(6000); // let the freshly-spawned claude TUI settle (first turn needs it ready)
 
   // Warm-up: a no-tool prompt materialises the transcript + proves the turn loop completes at all.
   const warm = await withTimeout(
     agent.prompt({ sessionId, prompt: [{ type: "text", text: "responda apenas: pronto" }] }),
-    60000, "warmup",
+    60000,
+    "warmup",
   ).catch((e) => ({ error: String(e.message || e) }));
-  results.push({ mode: "(warmup)", stopReason: warm?.stopReason ?? null, error: warm?.error ?? null });
+  results.push({
+    mode: "(warmup)",
+    stopReason: warm?.stopReason ?? null,
+    error: warm?.error ?? null,
+  });
 
   for (const mode of ["default", "acceptEdits", "bypassPermissions"]) {
     try {
-      await withTimeout(agent.setSessionConfigOption({ sessionId, configId: "mode", value: mode }), 30000, `set_mode(${mode})`);
+      await withTimeout(
+        agent.setSessionConfigOption({ sessionId, configId: "mode", value: mode }),
+        30000,
+        `set_mode(${mode})`,
+      );
     } catch (e) {
       results.push({ mode, setModeError: String(e.message || e) });
       continue;
@@ -113,18 +155,32 @@ try {
     const startIdx = sessionUpdates.length;
     const stderrMark = stderr.length;
     const file = `del-${mode}.txt`;
-    let stopReason = null, error = null;
+    let stopReason = null,
+      error = null;
     try {
       // Write-only prompt: bypass/acceptEdits should auto-allow (0 prompts); default should ask. (Bash
       // is omitted — it hits the separate gate-correlation Bug B, which would mask the mode signal.)
       const res = await withTimeout(
-        agent.prompt({ sessionId, prompt: [{ type: "text", text: `Crie o arquivo ${file} com o conteúdo exato: oi (apenas o arquivo, nada mais).` }] }),
-        70000, `prompt(${mode})`,
+        agent.prompt({
+          sessionId,
+          prompt: [
+            {
+              type: "text",
+              text: `Crie o arquivo ${file} com o conteúdo exato: oi (apenas o arquivo, nada mais).`,
+            },
+          ],
+        }),
+        70000,
+        `prompt(${mode})`,
       );
       stopReason = res?.stopReason ?? null;
     } catch (e) {
       error = String(e.message || e);
-      try { await agent.cancel({ sessionId }); } catch { /* SDK may lack cancel; the watchdog settles it */ }
+      try {
+        await agent.cancel({ sessionId });
+      } catch {
+        /* SDK may lack cancel; the watchdog settles it */
+      }
       await delay(3000); // let the cancelled turn settle so the next set_config_option finds idle
     }
 
@@ -142,7 +198,9 @@ try {
 } catch (e) {
   results.push({ fatal: String(e.message || e), stderrTail: stderr.slice(-600) });
 } finally {
-  try { child.kill(); } catch {}
+  try {
+    child.kill();
+  } catch {}
 }
 
 const bypass = results.find((r) => r.mode === "bypassPermissions");
@@ -153,5 +211,7 @@ const verdict =
       ? `STILL BROKEN: bypass asked ${bypass.permissionRequests}x / fileCreated=${bypass.fileCreated} — the mode did not take effect.`
       : "INCONCLUSIVE — see results/fatal.";
 
-console.log(JSON.stringify({ probe: "E — ACP-wire mode/permission (live)", verdict, results }, null, 2));
+console.log(
+  JSON.stringify({ probe: "E — ACP-wire mode/permission (live)", verdict, results }, null, 2),
+);
 process.exit(0);

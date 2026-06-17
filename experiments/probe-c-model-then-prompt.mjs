@@ -60,7 +60,8 @@ const strip = (s) =>
     .replace(/\x1b[()][0-9A-B]/g, "")
     .replace(/\x1b[=>]/g, "");
 
-const RE_WORKING = /esc to interrupt|to interrupt|↓\s*\d+\s*tokens|tokens\)|Brewed for|Coalescing|Beboppin|Bopping|Brewing/i;
+const RE_WORKING =
+  /esc to interrupt|to interrupt|↓\s*\d+\s*tokens|tokens\)|Brewed for|Coalescing|Beboppin|Bopping|Brewing/i;
 const RE_IDLE = /for shortcuts/i;
 const RE_MODELSET = /Set model to/i;
 const RE_BANNER_MODEL = /(Opus|Sonnet|Haiku)\s*[\d.]/i;
@@ -84,34 +85,73 @@ async function detectTurn(p, getBufLen, getSlice, sendFn, label) {
   const sliceSince = () => getSlice(mark);
   await sendFn();
   const started = await poll(sliceSince, RE_WORKING, STARTED_TIMEOUT);
-  if (!started.ok) return { label, started: false, done: false, note: `no working-spinner in ${started.ms}ms → input eaten (HANG)` };
+  if (!started.ok)
+    return {
+      label,
+      started: false,
+      done: false,
+      note: `no working-spinner in ${started.ms}ms → input eaten (HANG)`,
+    };
   const done = await poll(sliceSince, RE_IDLE, DONE_TIMEOUT);
-  return { label, started: true, done: done.ok, note: done.ok ? `started+done in ${done.ms}ms` : `started but no idle-footer in ${done.ms}ms` };
+  return {
+    label,
+    started: true,
+    done: done.ok,
+    note: done.ok ? `started+done in ${done.ms}ms` : `started but no idle-footer in ${done.ms}ms`,
+  };
 }
 
 async function runArm(injectMode, cwd) {
   const sessionId = randomUUID();
   const p = pty.spawn("bash", ["-lc", `claude --session-id ${sessionId}`], {
-    name: "xterm-256color", cols: 120, rows: 40, cwd, env: process.env,
+    name: "xterm-256color",
+    cols: 120,
+    rows: 40,
+    cwd,
+    env: process.env,
   });
   let buf = "";
-  p.onData((d) => { buf += d; });
+  p.onData((d) => {
+    buf += d;
+  });
   const getLen = () => buf.length;
   const sliceFrom = (m = 0) => buf.slice(m);
 
-  const r = { arm: injectMode, sessionId, originalAlias: null, testAlias: null, turn1: null, modelApplied: null, turn2: null, verdict: null, restoredTo: null };
+  const r = {
+    arm: injectMode,
+    sessionId,
+    originalAlias: null,
+    testAlias: null,
+    turn1: null,
+    modelApplied: null,
+    turn2: null,
+    verdict: null,
+    restoredTo: null,
+  };
   try {
     const ready = await poll(() => sliceFrom(0), RE_IDLE, READY_TIMEOUT);
-    if (!ready.ok) { r.verdict = `VOID (TUI never reached idle footer in ${ready.ms}ms)`; return r; }
+    if (!ready.ok) {
+      r.verdict = `VOID (TUI never reached idle footer in ${ready.ms}ms)`;
+      return r;
+    }
 
     const bm = strip(buf).match(RE_BANNER_MODEL);
     r.originalAlias = bm ? bm[1].toLowerCase() : "opus";
     r.testAlias = r.originalAlias === "haiku" ? "sonnet" : "haiku";
 
     // (1) baseline turn — must submit + complete, else the arm is void
-    const t1 = await detectTurn(p, getLen, sliceFrom, () => sendTimed(p, "responda apenas com a palavra: pronto"), "turn1");
+    const t1 = await detectTurn(
+      p,
+      getLen,
+      sliceFrom,
+      () => sendTimed(p, "responda apenas com a palavra: pronto"),
+      "turn1",
+    );
     r.turn1 = t1.note;
-    if (!t1.started) { r.verdict = "VOID (baseline turn1 input eaten — harness issue, not the bug)"; return r; }
+    if (!t1.started) {
+      r.verdict = "VOID (baseline turn1 input eaten — harness issue, not the bug)";
+      return r;
+    }
 
     // (2) inject /model (sync = prod today / timed = proposed fix)
     const mm = getLen();
@@ -121,7 +161,13 @@ async function runArm(injectMode, cwd) {
     r.modelApplied = ma.ok ? `applied in ${ma.ms}ms` : `no 'Set model to' in ${ma.ms}ms`;
 
     // (3) THE TEST: a normal (timed) prompt AFTER /model
-    const t2 = await detectTurn(p, getLen, sliceFrom, () => sendTimed(p, "responda apenas com a palavra: dois"), "turn2");
+    const t2 = await detectTurn(
+      p,
+      getLen,
+      sliceFrom,
+      () => sendTimed(p, "responda apenas com a palavra: dois"),
+      "turn2",
+    );
     r.turn2 = t2.note;
     r.verdict = !t2.started ? "HANG" : t2.done ? "OK" : "RAN-NO-FINISH";
 
@@ -129,31 +175,50 @@ async function runArm(injectMode, cwd) {
     const rm = getLen();
     await sendTimed(p, `/model ${r.originalAlias}`);
     const rr = await poll(() => sliceFrom(rm), RE_MODELSET, MODEL_TIMEOUT);
-    r.restoredTo = rr.ok ? r.originalAlias : `attempted ${r.originalAlias} (unconfirmed — may need manual /model)`;
+    r.restoredTo = rr.ok
+      ? r.originalAlias
+      : `attempted ${r.originalAlias} (unconfirmed — may need manual /model)`;
   } finally {
-    try { p.kill(); } catch {}
+    try {
+      p.kill();
+    } catch {}
   }
   return r;
 }
 
 const cwd = "/tmp/probe-c-model-hang";
 mkdirSync(cwd, { recursive: true });
-const hardStop = setTimeout(() => { console.log(JSON.stringify({ verdict: "GLOBAL-TIMEOUT" })); process.exit(2); }, 360000);
+const hardStop = setTimeout(() => {
+  console.log(JSON.stringify({ verdict: "GLOBAL-TIMEOUT" }));
+  process.exit(2);
+}, 360000);
 
 const sync = await runArm("sync", cwd);
 const timed = await runArm("timed", cwd);
 clearTimeout(hardStop);
 
 let interpretation;
-if (sync.verdict === "HANG" && timed.verdict === "OK") interpretation = "CONFIRMED: synchronous injection is the cause; the timed-injection fix works.";
-else if (sync.verdict === "HANG" && timed.verdict === "HANG") interpretation = "NOT the timing: /model itself breaks the next prompt — needs transcript-fence / Esc-dismiss / version handling.";
-else if (sync.verdict === "OK" && timed.verdict === "OK") interpretation = "Not reproducible headless — the hang is Zed-specific; needs an in-Zed instrumented repro.";
-else interpretation = `Inconclusive (sync=${sync.verdict}, timed=${timed.verdict}) — check VOID/RAN-NO-FINISH and re-run.`;
+if (sync.verdict === "HANG" && timed.verdict === "OK")
+  interpretation = "CONFIRMED: synchronous injection is the cause; the timed-injection fix works.";
+else if (sync.verdict === "HANG" && timed.verdict === "HANG")
+  interpretation =
+    "NOT the timing: /model itself breaks the next prompt — needs transcript-fence / Esc-dismiss / version handling.";
+else if (sync.verdict === "OK" && timed.verdict === "OK")
+  interpretation =
+    "Not reproducible headless — the hang is Zed-specific; needs an in-Zed instrumented repro.";
+else
+  interpretation = `Inconclusive (sync=${sync.verdict}, timed=${timed.verdict}) — check VOID/RAN-NO-FINISH and re-run.`;
 
-console.log(JSON.stringify({
-  probe: "C — /model-then-prompt hang (TUI-detected)",
-  arms: { sync, timed },
-  interpretation,
-  configNote: `final default model left ≈ '${timed.restoredTo ?? sync.restoredTo ?? "unknown"}'. If unconfirmed, run /model <your-model> once.`,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      probe: "C — /model-then-prompt hang (TUI-detected)",
+      arms: { sync, timed },
+      interpretation,
+      configNote: `final default model left ≈ '${timed.restoredTo ?? sync.restoredTo ?? "unknown"}'. If unconfirmed, run /model <your-model> once.`,
+    },
+    null,
+    2,
+  ),
+);
 process.exit(0);

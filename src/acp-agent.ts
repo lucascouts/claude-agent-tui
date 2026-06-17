@@ -143,7 +143,6 @@ type AccumulatedUsage = {
   cachedWriteTokens: number;
 };
 
-
 const DEFAULT_CONTEXT_WINDOW = 200000;
 
 type Session = {
@@ -464,7 +463,13 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // throws here → createSession's resume catch maps it to resourceNotFound (unchanged client
     // contract). No PTY, no tail watcher, no live engine — the only emission is replaySessionHistory.
     const { cwd } = await resolveWatchTarget(args.sessionId, { ...args.locateOptions });
-    return { sessionId: args.sessionId, pty: REPLAY_ONLY_NOOP_PTY, watcher: undefined, engine: undefined, cwd };
+    return {
+      sessionId: args.sessionId,
+      pty: REPLAY_ONLY_NOOP_PTY,
+      watcher: undefined,
+      engine: undefined,
+      cwd,
+    };
   }
 
   if (args.resume && args.sessionId) {
@@ -480,7 +485,9 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       permissionMode: args.permissionMode,
       effortLevel: args.effortLevel,
     });
-    const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId, { ...args.locateOptions });
+    const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId, {
+      ...args.locateOptions,
+    });
     const watcher = createJsonlWatcher({
       sessionId: args.sessionId,
       transcriptPath,
@@ -560,7 +567,13 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
   // Return IMMEDIATELY — the PTY is live; the watcher arms later, out of band. `watcher: undefined`
   // until the transcript appears; the cwd falls back to the known host `args.cwd` (the inside-cwd is
   // not known until the first JSONL line lands).
-  return { sessionId: engine.sessionId, pty: engine.pty, watcher: undefined, engine, cwd: args.cwd };
+  return {
+    sessionId: engine.sessionId,
+    pty: engine.pty,
+    watcher: undefined,
+    engine,
+    cwd: args.cwd,
+  };
 }
 
 /** Compute a stable fingerprint of the session-defining params so we can
@@ -942,9 +955,10 @@ export class ClaudeAcpAgent implements Agent {
     // diff on BOTH the live pump and the session/load replay (both read this.getMessages once). The
     // constructor default stays reduced (deps.liveDiff ?? false) for test determinism — the entrypoint
     // (index.ts) is what defaults it ON. OFF → byte-for-byte the pre-043 reduced reader (R5.1).
-    this.getMessages = (deps.liveDiff ?? false)
-      ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, deps.diffEnrichOptions)
-      : deps.getMessages;
+    this.getMessages =
+      (deps.liveDiff ?? false)
+        ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, deps.diffEnrichOptions)
+        : deps.getMessages;
     this.listSubagents = deps.listSubagents ?? defaultListSubagents;
     this.getSubagentMessages = deps.getSubagentMessages ?? defaultGetSubagentMessages;
     this.usageUpdate = deps.usageUpdate ?? false;
@@ -1468,7 +1482,11 @@ export class ClaudeAcpAgent implements Agent {
    * setSessionMode, while the config-option path was read-only → claude stuck on its spawn mode). The
    * caller has already validated `target` via {@link applySessionMode}.
    */
-  private async driveModeIntoTui(sessionId: string, session: Session, target: string): Promise<void> {
+  private async driveModeIntoTui(
+    sessionId: string,
+    session: Session,
+    target: string,
+  ): Promise<void> {
     if (target === session.modes.currentModeId) return; // no-op change applies nothing to the TUI
     // Idle-guard (design §9 / R3.8): driving/re-spawning is mutually exclusive with a turn in flight
     // (incl. the story-031 cancel ladder, observed as a live turnDetector) and with a re-spawn already
@@ -1576,8 +1594,14 @@ export class ClaudeAcpAgent implements Agent {
    * transcript, NEVER from p.onData). A per-step Δt budget + a one-full-cycle safety stop guarantee the
    * loop ABORTS rather than hangs/false-stalls (Probe A gated this; story-044 awareness).
    */
-  private async driveCyclableMode(sessionId: string, session: Session, target: string): Promise<void> {
-    const cyclableCount = session.modes.availableModes.filter((m) => CYCLABLE_MODES.has(m.id)).length;
+  private async driveCyclableMode(
+    sessionId: string,
+    session: Session,
+    target: string,
+  ): Promise<void> {
+    const cyclableCount = session.modes.availableModes.filter((m) =>
+      CYCLABLE_MODES.has(m.id),
+    ).length;
     const maxSteps = Math.max(cyclableCount, 1) + 1; // one-full-cycle safety stop
     for (let step = 0; step < maxSteps; step++) {
       if (session.modes.currentModeId === target) return; // converged
@@ -1622,7 +1646,8 @@ export class ClaudeAcpAgent implements Agent {
     const messages = await read(sessionId, { dir: session.cwd });
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i] as { type?: string; permissionMode?: unknown };
-      if (m.type === "permission-mode" && typeof m.permissionMode === "string") return m.permissionMode;
+      if (m.type === "permission-mode" && typeof m.permissionMode === "string")
+        return m.permissionMode;
     }
     return undefined;
   }
@@ -1685,7 +1710,11 @@ export class ClaudeAcpAgent implements Agent {
    * A no-op change applies nothing. Throwing here leaves the caller's applyConfigOptionValue unrun, so
    * the prior currentValue is left unchanged on failure (R3.7).
    */
-  private async applyEffortChange(sessionId: string, session: Session, level: string): Promise<void> {
+  private async applyEffortChange(
+    sessionId: string,
+    session: Session,
+    level: string,
+  ): Promise<void> {
     if (level === this.currentEffort(session)) return; // no value change → no-op
     if (session.turnDetector !== undefined || session.respawning) {
       throw new Error(
@@ -1717,7 +1746,9 @@ export class ClaudeAcpAgent implements Agent {
     if (latestMode === undefined || latestMode === session.modes.currentModeId) return;
     session.modes = { ...session.modes, currentModeId: latestMode };
     session.configOptions = session.configOptions.map((o) =>
-      o.id === "mode" && typeof o.currentValue === "string" ? { ...o, currentValue: latestMode } : o,
+      o.id === "mode" && typeof o.currentValue === "string"
+        ? { ...o, currentValue: latestMode }
+        : o,
     );
     await this.client.sessionUpdate({
       sessionId,
@@ -1810,7 +1841,10 @@ export class ClaudeAcpAgent implements Agent {
         ) {
           const toolCallId = (block as { tool_use_id: string }).tool_use_id;
           const name = toolUseCache[toolCallId]?.name;
-          const diffUpdate = diffToolCallUpdate(classifyDiffSource(name, toolUseResult), toolCallId);
+          const diffUpdate = diffToolCallUpdate(
+            classifyDiffSource(name, toolUseResult),
+            toolCallId,
+          );
           if (diffUpdate) {
             await this.client.sessionUpdate({
               sessionId,
@@ -1959,7 +1993,10 @@ export class ClaudeAcpAgent implements Agent {
         // (e.g. a tool_use's `prompt`, or a tool_result's rendered output).
         const acc: ToolCallContent[] = [];
         if (typeof u.title === "string" && u.title.length > 0) {
-          acc.push({ type: "content", content: { type: "text", text: `**${u.title}**` } } as ToolCallContent);
+          acc.push({
+            type: "content",
+            content: { type: "text", text: `**${u.title}**` },
+          } as ToolCallContent);
         }
         if (Array.isArray(u.content)) {
           for (const item of u.content) acc.push(item as ToolCallContent);
@@ -2082,7 +2119,11 @@ export class ClaudeAcpAgent implements Agent {
           schedule: this.schedule,
           onActivity: async () => {
             session.turnDetector?.noteActivity();
-            await this.emitLinearizedWithNested(sessionId, session, session.lastMessages ?? messages);
+            await this.emitLinearizedWithNested(
+              sessionId,
+              session,
+              session.lastMessages ?? messages,
+            );
           },
         });
       } else if (session.subagentWatcher) {
@@ -3246,7 +3287,6 @@ export function runAcp(deps?: AgentDeps) {
   }, stream);
   return { connection, agent };
 }
-
 
 /** Best-effort first guess of a model's context window from its ID, used only
  *  until a `result` message arrives with the authoritative `modelUsage` value.
