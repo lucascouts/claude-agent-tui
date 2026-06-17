@@ -94,6 +94,10 @@ const OUTPUT_TAIL_CAP = 16384;
 /** Filename prefix of the per-session scratch settings file (diagnosable in `ls /tmp`). */
 export const SCRATCH_SETTINGS_PREFIX = "fork-acp-gate-settings-";
 
+/** Story 046 (R3) — the file-edit tools that `acceptEdits` auto-allows, mirroring claude's native
+ *  acceptEdits semantics (edits proceed without prompting; every other tool still asks). */
+const EDIT_TOOLS: ReadonlySet<string> = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+
 /** The minimal PTY surface the gate needs: a raw writer (allow keystroke) and, when available, an
  *  `onData` tap feeding the native-prompt probe. Structurally satisfied by node-pty's IPty; the
  *  replay-only noop PTY also satisfies it (but replay-only sessions never get a gate). */
@@ -250,6 +254,16 @@ class SessionGateImpl implements SessionGate {
    */
   private async decide(call: ForwardedToolCall): Promise<"allow" | "deny"> {
     if (this.torndown) return "deny"; // a hook racing teardown is never approved
+
+    // === Story 046 (R3) — honor the live permission mode BEFORE relaying to Zed. =================
+    // The hook payload carries the current mode (probe-d confirmed `permission_mode` matches the
+    // selected mode in acceptEdits/bypassPermissions). Without this branch the gate raises
+    // session/request_permission for EVERY tool, overriding the panel's mode selector — the user sees
+    // a Zed prompt in every mode, even bypass. bypassPermissions auto-allows ALL tools; acceptEdits
+    // auto-allows edit-class tools; default/plan/auto/dontAsk fall through to the ACP relay (ask Zed).
+    // No #52822 sweep on this path: these modes make claude auto-proceed, so no native prompt renders.
+    if (call.permissionMode === "bypassPermissions") return "allow";
+    if (call.permissionMode === "acceptEdits" && EDIT_TOOLS.has(call.toolName)) return "allow";
 
     // Kick the pump so the freshest JSONL (carrying this call's `tool_use` line) is re-read NOW.
     try {

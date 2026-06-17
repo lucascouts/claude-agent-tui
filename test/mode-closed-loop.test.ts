@@ -106,3 +106,24 @@ test("4.3 the closed-loop path NEVER writes the sendPrompt Ctrl+U clear (it woul
     `the raw mode-cycle path must NOT emit the Ctrl+U clear (\\x15) — it corrupts \\x1b[Z, got: ${JSON.stringify(writes)}`,
   );
 });
+
+const setOptionMode = (agent: ClaudeAcpAgent, sessionId: string, value: string) =>
+  (agent as unknown as {
+    setSessionConfigOption: (p: { sessionId: string; configId: string; value: string }) => Promise<unknown>;
+  }).setSessionConfigOption({ sessionId, configId: "mode", value });
+
+test("Bug A: set_config_option(configId:'mode') ALSO drives the TUI — a cyclable mode writes \\x1b[Z (the path Zed actually uses)", async (t) => {
+  const { agent, writes } = makeAgent("acceptEdits");
+  t.after(() => agent.dispose());
+  const sessionId = await freshSession(agent);
+
+  // Zed sends mode changes via set_config_option(configId:"mode"), NOT setSessionMode — that path was
+  // read-only (Bug A: claude stayed on its spawn mode, so the live permission mode never changed). It
+  // must now drive identically to setSessionMode.
+  await setOptionMode(agent, sessionId, "acceptEdits");
+
+  assert.ok(
+    writes.some((w) => w.includes(SHIFT_TAB)),
+    `set_config_option(mode) must DRIVE the TUI (raw \\x1b[Z), not just validate (Bug A), got: ${JSON.stringify(writes)}`,
+  );
+});

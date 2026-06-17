@@ -1374,32 +1374,9 @@ export class ClaudeAcpAgent implements Agent {
     // Validate the requested mode against the session's availableModes (throws on an unknown/unavailable
     // mode — preserved). No state change here (Degrau-1 shim); the drive/re-spawn below applies it.
     await this.applySessionMode(params.sessionId, params.modeId);
-
-    const target = params.modeId;
-    const previous = session.modes.currentModeId;
-
-    // Story 046: a no-op change applies nothing to the TUI (Unchanged Behavior 4). The configOption
-    // update below still runs so the advertised currentValue stays in lockstep.
-    if (target !== previous) {
-      // Idle-guard (design §9 / R3.8): driving the TUI or re-spawning is mutually exclusive with a turn
-      // in flight (incl. the story-031 cancel ladder, observed as a live turnDetector) and with a
-      // re-spawn already in progress. Reject rather than write to a busy/dead PTY — the user retries
-      // when idle (a mode change, unlike a model switch, has no meaningful deferred-flush point).
-      if (session.turnDetector !== undefined || session.respawning) {
-        throw new Error(
-          "Cannot change permission mode while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
-        );
-      }
-      if (CYCLABLE_MODES.has(target)) {
-        // R3.3: drive the TUI with closed-loop raw Shift+Tab until the transcript confirms `target`.
-        await this.driveCyclableMode(params.sessionId, session, target);
-      } else {
-        // R3.4: dontAsk/bypassPermissions are not on the Shift+Tab cycle — re-spawn in place.
-        await this.respawnSession(params.sessionId, session, { permissionMode: target });
-      }
-    }
-
-    await this.updateConfigOption(params.sessionId, "mode", target);
+    // Drive the validated mode INTO the claude TUI (shared with the set_config_option path, Bug A fix).
+    await this.driveModeIntoTui(params.sessionId, session, params.modeId);
+    await this.updateConfigOption(params.sessionId, "mode", params.modeId);
     return {};
   }
 
@@ -1450,6 +1427,10 @@ export class ClaudeAcpAgent implements Agent {
 
     if (params.configId === "mode") {
       await this.applySessionMode(params.sessionId, resolvedValue);
+      // Bug A fix (Story 046 R3) — Zed sends mode changes via set_config_option(configId:"mode"), so
+      // the DRIVE must happen HERE too. This path used to only validate (read-only), leaving claude
+      // stuck on its spawn mode — the live permission mode never changed (bypass/acceptEdits no-op'd).
+      await this.driveModeIntoTui(params.sessionId, session, resolvedValue);
       await this.client.sessionUpdate({
         sessionId: params.sessionId,
         update: {
@@ -1476,6 +1457,34 @@ export class ClaudeAcpAgent implements Agent {
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
 
     return { configOptions: session.configOptions };
+  }
+
+  /**
+   * Story 046 (R3, Bug A fix) — drive a permission-mode change INTO the claude TUI (the load-bearing
+   * half). Cyclable modes (default/acceptEdits/plan/auto) drive via closed-loop Shift+Tab; dontAsk/
+   * bypassPermissions re-spawn with `--permission-mode`. Idle-guarded (R3.8); a no-op change applies
+   * nothing. SHARED by setSessionMode AND setSessionConfigOption(configId:"mode") — Zed sends mode
+   * changes via the latter, so the driving MUST live on both paths (it previously lived only on
+   * setSessionMode, while the config-option path was read-only → claude stuck on its spawn mode). The
+   * caller has already validated `target` via {@link applySessionMode}.
+   */
+  private async driveModeIntoTui(sessionId: string, session: Session, target: string): Promise<void> {
+    if (target === session.modes.currentModeId) return; // no-op change applies nothing to the TUI
+    // Idle-guard (design §9 / R3.8): driving/re-spawning is mutually exclusive with a turn in flight
+    // (incl. the story-031 cancel ladder, observed as a live turnDetector) and with a re-spawn already
+    // underway. Reject rather than write to a busy/dead PTY — the user retries when idle.
+    if (session.turnDetector !== undefined || session.respawning) {
+      throw new Error(
+        "Cannot change permission mode while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
+      );
+    }
+    if (CYCLABLE_MODES.has(target)) {
+      // R3.3: drive the TUI with closed-loop raw Shift+Tab until the transcript confirms `target`.
+      await this.driveCyclableMode(sessionId, session, target);
+    } else {
+      // R3.4: dontAsk/bypassPermissions are not on the Shift+Tab cycle — re-spawn in place.
+      await this.respawnSession(sessionId, session, { permissionMode: target });
+    }
   }
 
   private async applySessionMode(sessionId: string, modeId: string): Promise<void> {
