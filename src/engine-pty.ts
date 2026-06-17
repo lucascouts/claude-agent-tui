@@ -194,8 +194,14 @@ export interface PtyEngineHandle {
  * process-supervisor or non-PTY spawn variant is introduced.
  */
 export function spawnClaudePty(opts: SpawnPtyOptions): PtyEngineHandle {
-  const { cwd, baseEnv = process.env, spawn = pty.spawn, permissionMode, settingsFile, effortLevel } =
-    opts;
+  const {
+    cwd,
+    baseEnv = process.env,
+    spawn = pty.spawn,
+    permissionMode,
+    settingsFile,
+    effortLevel,
+  } = opts;
 
   const sessionId = randomUUID(); // pre-generated → correlates to the JSONL transcript
   const shell = resolveShell(baseEnv);

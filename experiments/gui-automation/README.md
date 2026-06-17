@@ -37,6 +37,7 @@ user access with a udev rule + group:
 # /etc/udev/rules.d/80-uinput.rules
 KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
 ```
+
 ```bash
 sudo gpasswd -a "$USER" input        # add yourself to the input group
 sudo udevadm control --reload && sudo udevadm trigger
