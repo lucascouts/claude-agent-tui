@@ -55,6 +55,22 @@ npm test
 - Token-usage updates
 - Prompt input, cancellation, and session load/replay
 
+## Supply-chain notes
+
+[Socket](https://socket.dev/npm/package/@lucascouts/claude-agent-tui) flags some
+dependency alerts (`Native code`, `Install scripts`, `Shell access`, plus
+heuristic flags on the Anthropic SDK tree). **None are CVEs or malware** — they
+are expected capability flags:
+
+- `node-pty` (the same PTY that powers VS Code) needs `Native code` /
+  `Install scripts` / `Shell access` — driving the `claude` TUI in a real PTY is
+  the whole point of this bridge.
+- The remaining flags come from the minified bundles inside
+  `@anthropic-ai/claude-agent-sdk`, of which this fork uses only two pure,
+  billing-free functions (`getSessionMessages`, `resolveSettings`).
+
+All direct dependencies are first-party publishers (Microsoft, Anthropic, Zed).
+
 ## License
 
 [Apache-2.0](LICENSE). This is a derivative work; original copyright belongs to Zed Industries and the Agent Client Protocol authors.

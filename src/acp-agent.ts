@@ -73,7 +73,7 @@ import {
 import { nodeToWebReadable, nodeToWebWritable, unreachable } from "./utils.js";
 // === SEAM(011): engine boundary — inject a temporary no-op engine so the agent
 // boots without the cut SDK query() path; the real PTY engine arrives in 013–015/023.
-// See SEAM-MAP.md (createSession/prompt CUT→023) and src/engine.ts. ===
+// See fork/SEAM-MAP.md (createSession/prompt CUT→023) and src/engine.ts. ===
 import { type Engine, createStubEngine } from "./engine.js";
 // === SEAM(023) Group 1: the real PTY + JSONL-tail engine wiring for createSession.
 // createSession spawns the subscription `claude` TUI under a PTY (story 013) managed by a
@@ -107,6 +107,7 @@ import { usageUpdatesFor, type UsageCarrier } from "./usage.js";
 import { createTurnResolver } from "./end-of-turn.js";
 import type { DetectorSchedule, EndOfTurnDetector } from "./end-of-turn.js";
 import { sendPrompt } from "./engine-pty.js";
+import { MODEL_CATALOG, DEFAULT_MODEL_INFO } from "./model-catalog.js";
 import { setupSessionGate } from "./permissions/gate-wiring.js";
 import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gate-wiring.js";
 
@@ -141,6 +142,7 @@ type AccumulatedUsage = {
   cachedReadTokens: number;
   cachedWriteTokens: number;
 };
+
 
 const DEFAULT_CONTEXT_WINDOW = 200000;
 
@@ -213,6 +215,19 @@ type Session = {
    * once and a prior turn's terminal boundary is never re-observed.
    */
   detectorCursor?: number;
+  /**
+   * Story 046 (R1.3, design §5/§9) — a model-switch (`/model <alias>`) requested WHILE a turn is in
+   * flight is deferred here (last-write-wins, §9 coalescing) and flushed as a side-channel PTY write
+   * once the turn settles (prompt()'s finally → {@link flushPendingControlInjections}). Undefined when
+   * nothing is queued.
+   */
+  pendingModelInjection?: string;
+  /**
+   * Story 046 (R3.8) — true WHILE an in-place re-spawn (R3.4 dontAsk/bypass switch) is between the old
+   * PTY teardown and the new PTY being ready. Selector changes arriving in this window are rejected
+   * rather than written to a dead PTY.
+   */
+  respawning?: boolean;
   /**
    * Story 034 (§9 / R3.3) — the per-session HYBRID permission-gate runtime: loopback `PreToolUse`
    * hook server + scratch `--settings` backup + `tool_use.id` correlator. Present only when the
@@ -313,6 +328,17 @@ export interface StartEngineArgs {
    * (`buildResumeArgv`) is NOT extended here; the replay-only load path spawns nothing.
    */
   settingsFile?: string;
+  /**
+   * Story 046 (R3.2, choose-before-start): the seeded permission mode, forwarded to the spawn as
+   * `--permission-mode <mode>` (non-"default" only). Threaded to BOTH the fresh ({@link
+   * createSessionEngine}) and resume ({@link spawnResumePty}) paths so the R3.4 re-spawn carries it too.
+   */
+  permissionMode?: string;
+  /**
+   * Story 046 (R2.2): the seeded/re-spawn reasoning effort, forwarded to the spawn as `--effort
+   * <level>` (non-"default" only). Threaded to BOTH the fresh and resume spawn paths.
+   */
+  effortLevel?: string;
 }
 
 /** The createSession injection seam: spawn the PTY engine + JSONL watcher + locate the transcript. */
@@ -438,13 +464,7 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // throws here → createSession's resume catch maps it to resourceNotFound (unchanged client
     // contract). No PTY, no tail watcher, no live engine — the only emission is replaySessionHistory.
     const { cwd } = await resolveWatchTarget(args.sessionId, { ...args.locateOptions });
-    return {
-      sessionId: args.sessionId,
-      pty: REPLAY_ONLY_NOOP_PTY,
-      watcher: undefined,
-      engine: undefined,
-      cwd,
-    };
+    return { sessionId: args.sessionId, pty: REPLAY_ONLY_NOOP_PTY, watcher: undefined, engine: undefined, cwd };
   }
 
   if (args.resume && args.sessionId) {
@@ -455,10 +475,12 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       cwd: args.cwd,
       baseEnv: args.baseEnv,
       spawn: args.spawn,
+      // Story 046 (R3.4/R2.2): the in-place re-spawn (dontAsk/bypass or an effort change) reattaches the
+      // SAME sessionId carrying its mode/effort flags through the resume argv (buildResumeArgv).
+      permissionMode: args.permissionMode,
+      effortLevel: args.effortLevel,
     });
-    const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId, {
-      ...args.locateOptions,
-    });
+    const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId, { ...args.locateOptions });
     const watcher = createJsonlWatcher({
       sessionId: args.sessionId,
       transcriptPath,
@@ -483,6 +505,10 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     baseEnv: args.baseEnv,
     sessions: args.sessions,
     spawn: args.spawn,
+    // Story 046 (R3.2/R2.2): the seeded permission mode + effort → `--permission-mode`/`--effort` on
+    // the fresh spawn (non-"default" only; "default"/undefined keep the byte-for-byte pre-046 argv).
+    permissionMode: args.permissionMode,
+    effortLevel: args.effortLevel,
     // Story 034 (§9): the per-session gate scratch settings, already on disk — claude reads them at
     // startup, so the hook gates the FIRST tool call (blocker c). Absent → ungated (pre-034) spawn.
     settingsFile: args.settingsFile,
@@ -534,22 +560,8 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
   // Return IMMEDIATELY — the PTY is live; the watcher arms later, out of band. `watcher: undefined`
   // until the transcript appears; the cwd falls back to the known host `args.cwd` (the inside-cwd is
   // not known until the first JSONL line lands).
-  return {
-    sessionId: engine.sessionId,
-    pty: engine.pty,
-    watcher: undefined,
-    engine,
-    cwd: args.cwd,
-  };
+  return { sessionId: engine.sessionId, pty: engine.pty, watcher: undefined, engine, cwd: args.cwd };
 }
-
-/** A single default Degrau-1 model entry. The TUI owns real model selection in Degrau-1; this is an
- *  honest non-interactive default so configOptions/modes have a coherent current model to anchor on. */
-const DEGRAU1_DEFAULT_MODEL_INFO: ModelInfo = {
-  value: "default",
-  displayName: "Default",
-  description: "Default model (selection is owned by the interactive TUI in Degrau-1)",
-};
 
 /** Compute a stable fingerprint of the session-defining params so we can
  *  detect when a loadSession/resumeSession call requires tearing down and
@@ -670,7 +682,7 @@ export type ToolUseCache = {
 // spawns the subscription `claude` through the login shell (`bash -lc 'claude …'`), so it resolves
 // from PATH — the same E1 keystone (experiments/DEGRAU0-RESULTS.md), via the shell rather than an
 // explicit resolveClaudePath() call here. resolveClaudePath() (story 012) is retained for the
-// `--cli` auth spawn in index.ts. See src/claude-path.ts, SEAM-MAP.md, IMPLEMENTACAO §3/§5. ===
+// `--cli` auth spawn in index.ts. See fork/src/claude-path.ts, fork/SEAM-MAP.md, IMPLEMENTACAO §3/§5. ===
 
 function shouldHideClaudeAuth(): boolean {
   return process.argv.includes("--hide-claude-auth");
@@ -779,6 +791,29 @@ export function resolvePermissionMode(
 }
 
 /**
+ * Story 046 (R3.3): the permission modes the TUI cycles through with Shift+Tab (`\x1b[Z`), reachable
+ * by the closed-loop driver by stepping. `dontAsk`/`bypassPermissions` are NOT on this cycle — they
+ * are applied by an in-place re-spawn instead (R3.4).
+ */
+const CYCLABLE_MODES = new Set<string>(["default", "acceptEdits", "plan", "auto"]);
+
+/** Story 046 (R3.3): the raw Shift+Tab bytes that cycle the TUI permission mode. Written DIRECTLY to
+ *  the PTY — NEVER via sendPrompt, whose leading Ctrl+U clear would corrupt the escape (design GOTCHA). */
+const MODE_CYCLE_KEY = "\x1b[Z";
+
+/** Story 046 (R3.3): per-step budget for the closed-loop to see the confirming permission-mode
+ *  transcript event before aborting (no hang, story-044 awareness); polled every MODE_CYCLE_POLL_MS. */
+const MODE_CYCLE_STEP_TIMEOUT_MS = 2000;
+const MODE_CYCLE_POLL_MS = 50;
+
+/** Story 046 (hang fix): claude 2.1.176 opens a blocking "Switch model?" confirm dialog on a mid-
+ *  conversation `/model <alias>` (GrowthBook `tengu_immediate_model_command=false`). Delay before the
+ *  blind confirm Enter so the dialog has rendered first; the dialog stays open until confirmed, so a
+ *  late Enter still lands while an early (pre-render) one would be lost. 800 ms validated headless
+ *  (experiments/probe-c-model-then-prompt.mjs: the dialog rendered + the switch applied within it). */
+const MODEL_CONFIRM_DELAY_MS = 800;
+
+/**
  * Builds the label for the "Always Allow" permission option so the user can see
  * the exact scope they are committing to. Uses the SDK-provided suggestions
  * when available (e.g. `Bash(npm test:*)`) and falls back to naming the whole
@@ -860,7 +895,7 @@ export class ClaudeAcpAgent implements Agent {
   gatewayAuthRequest?: GatewayAuthRequest;
   // === SEAM(011): the injected engine — a no-op stub by default (READ-ONLY Degrau 1);
   // the PTY + JSONL-tail engine replaces the default in 013–015/023. `initialize`
-  // does NOT touch this field (story 011 Task 1.2). See SEAM-MAP.md. ===
+  // does NOT touch this field (story 011 Task 1.2). See fork/SEAM-MAP.md. ===
   engine: Engine;
   // === SEAM(023) Group 1: the createSession PTY-engine start seam. Defaults to the production
   // wiring (defaultStartEngine: PTY spawn + JSONL watcher + transcript discovery); tests inject a
@@ -907,10 +942,9 @@ export class ClaudeAcpAgent implements Agent {
     // diff on BOTH the live pump and the session/load replay (both read this.getMessages once). The
     // constructor default stays reduced (deps.liveDiff ?? false) for test determinism — the entrypoint
     // (index.ts) is what defaults it ON. OFF → byte-for-byte the pre-043 reduced reader (R5.1).
-    this.getMessages =
-      (deps.liveDiff ?? false)
-        ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, deps.diffEnrichOptions)
-        : deps.getMessages;
+    this.getMessages = (deps.liveDiff ?? false)
+      ? createDiffEnrichedReader(deps.getMessages ?? defaultGetMessages, deps.diffEnrichOptions)
+      : deps.getMessages;
     this.listSubagents = deps.listSubagents ?? defaultListSubagents;
     this.getSubagentMessages = deps.getSubagentMessages ?? defaultGetSubagentMessages;
     this.usageUpdate = deps.usageUpdate ?? false;
@@ -1227,6 +1261,8 @@ export class ClaudeAcpAgent implements Agent {
       // so the in-turn sub-agent watcher dies with it (covers turn-resolve AND markCancelled paths).
       sessionRecord.subagentWatcher?.stop();
       sessionRecord.subagentWatcher = undefined;
+      // Story 046 (R1.3): the session is idle again — flush any model switch deferred mid-turn.
+      this.flushPendingControlInjections(sessionRecord);
     }
   }
 
@@ -1330,12 +1366,40 @@ export class ClaudeAcpAgent implements Agent {
   }
 
   async setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse> {
-    if (!this.sessions[params.sessionId]) {
+    const session = this.sessions[params.sessionId];
+    if (!session) {
       throw new Error("Session not found");
     }
 
+    // Validate the requested mode against the session's availableModes (throws on an unknown/unavailable
+    // mode — preserved). No state change here (Degrau-1 shim); the drive/re-spawn below applies it.
     await this.applySessionMode(params.sessionId, params.modeId);
-    await this.updateConfigOption(params.sessionId, "mode", params.modeId);
+
+    const target = params.modeId;
+    const previous = session.modes.currentModeId;
+
+    // Story 046: a no-op change applies nothing to the TUI (Unchanged Behavior 4). The configOption
+    // update below still runs so the advertised currentValue stays in lockstep.
+    if (target !== previous) {
+      // Idle-guard (design §9 / R3.8): driving the TUI or re-spawning is mutually exclusive with a turn
+      // in flight (incl. the story-031 cancel ladder, observed as a live turnDetector) and with a
+      // re-spawn already in progress. Reject rather than write to a busy/dead PTY — the user retries
+      // when idle (a mode change, unlike a model switch, has no meaningful deferred-flush point).
+      if (session.turnDetector !== undefined || session.respawning) {
+        throw new Error(
+          "Cannot change permission mode while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
+        );
+      }
+      if (CYCLABLE_MODES.has(target)) {
+        // R3.3: drive the TUI with closed-loop raw Shift+Tab until the transcript confirms `target`.
+        await this.driveCyclableMode(params.sessionId, session, target);
+      } else {
+        // R3.4: dontAsk/bypassPermissions are not on the Shift+Tab cycle — re-spawn in place.
+        await this.respawnSession(params.sessionId, session, { permissionMode: target });
+      }
+    }
+
+    await this.updateConfigOption(params.sessionId, "mode", target);
     return {};
   }
 
@@ -1394,9 +1458,20 @@ export class ClaudeAcpAgent implements Agent {
         },
       });
     }
-    // === SEAM(023) Group 1: the `model` branch's SDK `query.setModel` is dropped — local config
-    // state is updated by applyConfigOptionValue below (read-only Degrau-1 shim).
-    // Degrau 2 (030/032): PTY-backed control. ===
+    // === SEAM(023→046) Group 1: the dropped SDK `query.setModel` is replaced by a PTY side-channel.
+    // `/model <alias>` is a LOCAL TUI command (no assistant turn, no stop_reason) — inject it as a
+    // write that resolves immediately; NEVER route it through prompt()/the turn-resolver (it would
+    // hang forever) and never set turnDetector (R1.4). Idle-guard on turnDetector === undefined
+    // (design §5): mid-turn, defer behind pendingModelInjection and flush when the turn settles (R1.3).
+    // resolvedValue is already the canonical catalog alias. ===
+    if (params.configId === "model") {
+      this.applyModelSwitch(session, resolvedValue);
+    } else if (params.configId === "effort") {
+      // Story 046 (R2.2): Probe B verdict — effort has no live mid-session path, so an effort change
+      // re-spawns in place with `--effort <level>` (idle-guarded, R3.7 failure path). On throw, the
+      // applyConfigOptionValue below is skipped so the prior currentValue stays unchanged.
+      await this.applyEffortChange(params.sessionId, session, resolvedValue);
+    }
 
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
 
@@ -1428,6 +1503,217 @@ export class ClaudeAcpAgent implements Agent {
     // above; the local currentModeId is updated by applyConfigOptionValue and the notification is
     // emitted by the caller. No SDK `query.setPermissionMode`.
     // Degrau 2 (030/032): PTY-backed control — drive the TUI to apply the permission mode. ===
+  }
+
+  /**
+   * Story 046 (R1.2–R1.4, design §5) — apply a live model switch by injecting `/model <alias>` into
+   * the PTY as a SIDE-CHANNEL write. `/model` is a local TUI command: no assistant turn, no
+   * stop_reason — so it is NEVER routed through prompt()/createTurnResolver (that would hang) and
+   * never sets turnDetector (R1.4). The write goes through sendPrompt for its Ctrl+U input-clear but
+   * with a SYNCHRONOUS schedule so the command + `\r` commit immediately (resolves now; it awaits no
+   * turn). Idle-guard: inject only when no turn is in flight; otherwise defer (last-write-wins, §9)
+   * and flush when the turn settles (R1.3).
+   */
+  private applyModelSwitch(session: Session, alias: string): void {
+    if (session.turnDetector !== undefined) {
+      // A turn is in flight — injecting mid-turn corrupts the PTY input. Defer (coalesce, §9).
+      session.pendingModelInjection = alias;
+      return;
+    }
+    // Re-selecting the model the session is already on is a no-op: claude shows no "Switch model?"
+    // dialog for it, so skip the redundant /model (and its confirm Enter) entirely.
+    const current = session.configOptions.find((o) => o.id === "model")?.currentValue;
+    if (current === alias) return;
+    this.injectModelCommand(session, alias);
+  }
+
+  /**
+   * Side-channel `/model <alias>` write — synchronous, resolves immediately (never a turn). claude
+   * 2.1.176 (GrowthBook `tengu_immediate_model_command=false`) does NOT apply `/model` inline mid-
+   * conversation: it opens a blocking **"Switch model?" → 1. Yes / 2. No** dialog and leaves it OPEN.
+   * Unconfirmed, the dialog survives until the NEXT prompt — whose `\r` then confirms the switch AND
+   * discards the prompt text, so no turn is born and the story-024 stall watchdog trips (the live
+   * 39a93bfc hang; root cause proved headless by experiments/probe-c-model-then-prompt.mjs). So after
+   * the command we schedule ONE Enter to accept the default "Yes, switch" once the dialog has rendered;
+   * if no dialog appears (same model / flag flipped on) Enter-on-empty-input is a harmless no-op.
+   */
+  private injectModelCommand(session: Session, alias: string): void {
+    sendPrompt(session.pty, `/model ${alias}`, (fn) => fn());
+    // Confirm the "Switch model?" dialog — blind + scheduled, like the story-031 cancel ladder's Esc.
+    this.schedule(() => {
+      if (session.engine?.isDisposed) return; // PTY exited meanwhile → nothing to confirm
+      session.pty.write("\r");
+    }, MODEL_CONFIRM_DELAY_MS);
+  }
+
+  /**
+   * Story 046 (R1.3) — flush a deferred model-switch once the session is idle again (called from
+   * prompt()'s finally, the moment the turn settles). Last-write-wins: only the most recent queued
+   * alias is injected; the field is cleared so a settled session with nothing queued injects nothing.
+   */
+  private flushPendingControlInjections(session: Session): void {
+    if (session.turnDetector !== undefined) return; // still not idle (defensive)
+    const alias = session.pendingModelInjection;
+    if (alias !== undefined) {
+      session.pendingModelInjection = undefined;
+      this.injectModelCommand(session, alias);
+    }
+  }
+
+  /**
+   * Story 046 (R3.3, design §6b) — drive the TUI to `target` with closed-loop raw Shift+Tab. Writes
+   * `\x1b[Z` DIRECTLY to the PTY (NOT sendPrompt — its Ctrl+U clear corrupts the escape), then awaits
+   * the confirming `permission-mode` transcript event (the tail-as-truth fence: mode is read from the
+   * transcript, NEVER from p.onData). A per-step Δt budget + a one-full-cycle safety stop guarantee the
+   * loop ABORTS rather than hangs/false-stalls (Probe A gated this; story-044 awareness).
+   */
+  private async driveCyclableMode(sessionId: string, session: Session, target: string): Promise<void> {
+    const cyclableCount = session.modes.availableModes.filter((m) => CYCLABLE_MODES.has(m.id)).length;
+    const maxSteps = Math.max(cyclableCount, 1) + 1; // one-full-cycle safety stop
+    for (let step = 0; step < maxSteps; step++) {
+      if (session.modes.currentModeId === target) return; // converged
+      const before = session.modes.currentModeId;
+      session.pty.write(MODE_CYCLE_KEY); // raw \x1b[Z (Shift+Tab) — never via sendPrompt
+      const observed = await this.awaitModeChange(sessionId, session, before);
+      if (observed === undefined) return; // Δt elapsed with no confirming event → abort (no hang)
+      session.modes.currentModeId = observed; // reconcile local state from the transcript truth
+    }
+  }
+
+  /**
+   * Story 046 (R3.3) — poll the transcript (the pump's getMessages seam) for a `permission-mode` event
+   * whose mode differs from `before`, up to MODE_CYCLE_STEP_TIMEOUT_MS. Returns the new mode, or
+   * undefined on the Δt timeout (the caller aborts rather than hangs). The confirming event is usually
+   * already present right after the TUI processes the keystroke, so this returns at once in tests.
+   */
+  private async awaitModeChange(
+    sessionId: string,
+    session: Session,
+    before: string,
+  ): Promise<string | undefined> {
+    let waited = 0;
+    for (;;) {
+      const mode = await this.readLatestPermissionMode(sessionId, session);
+      if (mode !== undefined && mode !== before) return mode;
+      if (waited >= MODE_CYCLE_STEP_TIMEOUT_MS) return undefined;
+      await new Promise<void>((resolve) => this.schedule(() => resolve(), MODE_CYCLE_POLL_MS));
+      waited += MODE_CYCLE_POLL_MS;
+    }
+  }
+
+  /** Story 046 (R3.3/R4.1) — the most recent `permission-mode` event's mode from the transcript (the
+   *  same getMessages seam the pump reads), or undefined when none is present yet. */
+  private async readLatestPermissionMode(
+    sessionId: string,
+    session: Session,
+  ): Promise<string | undefined> {
+    // Mirror the pump's seam resolution: this.getMessages is the injectable reader, defaulting to
+    // defaultGetMessages when not overridden (it is optional at the constructor seam).
+    const read = this.getMessages ?? defaultGetMessages;
+    const messages = await read(sessionId, { dir: session.cwd });
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i] as { type?: string; permissionMode?: unknown };
+      if (m.type === "permission-mode" && typeof m.permissionMode === "string") return m.permissionMode;
+    }
+    return undefined;
+  }
+
+  /**
+   * Story 046 (R3.4/R3.7/R3.8, design §6c) — apply a non-cyclable mode (dontAsk/bypassPermissions) by
+   * re-spawning the SAME sessionId in place with a flag-carrying resume argv, preserving the transcript.
+   * Order is load-bearing for R3.7: re-spawn FIRST, and swap in + tear down the old PTY ONLY once the new
+   * one is live — so a failed re-spawn leaves the prior PTY/currentValue intact (never
+   * torn-down-without-replacement). Re-spawn runs only while idle, so the old PTY has no pending turn to
+   * double-resolve. The `respawning` latch defers concurrent selector changes (R3.8).
+   */
+  private async respawnSession(
+    sessionId: string,
+    session: Session,
+    change: { permissionMode?: string; effortLevel?: string },
+  ): Promise<void> {
+    session.respawning = true;
+    try {
+      const oldEngine = session.engine;
+      // Preserve the OTHER selector's current value so re-spawning for one (mode OR effort) does not
+      // reset the other — the resume argv carries both flags.
+      const permissionMode = change.permissionMode ?? session.modes.currentModeId;
+      const effortLevel = change.effortLevel ?? this.currentEffort(session);
+      // Re-spawn through the SAME startEngine seam createSession uses, reusing the sessionId so the
+      // transcript is reattached (R3.4); the flags flow into the flag-carrying resume argv.
+      const started = await this.startEngine({
+        sessionId,
+        cwd: session.cwd,
+        resume: true,
+        permissionMode,
+        effortLevel,
+        sessions: this.engines,
+        onEvent: (sid) => void this.pumpUpdates(sid),
+      });
+      // New PTY is live — only now retire the old one (idle ⇒ no pending turn to double-resolve) and swap.
+      oldEngine?.cleanup();
+      oldEngine?.kill();
+      session.pty = started.pty;
+      session.engine = started.engine;
+      session.watcher = started.watcher;
+      if (change.permissionMode) {
+        session.modes = { ...session.modes, currentModeId: change.permissionMode };
+      }
+    } finally {
+      session.respawning = false;
+    }
+  }
+
+  /** Story 046 — the session's current effort configOption value (undefined when no effort option). */
+  private currentEffort(session: Session): string | undefined {
+    const opt = session.configOptions.find((o) => o.id === "effort");
+    return typeof opt?.currentValue === "string" ? opt.currentValue : undefined;
+  }
+
+  /**
+   * Story 046 (R2.2, design §7) — apply a reasoning-effort change. Probe B verdict: effort has no live
+   * mid-session mechanism (`--effort` is a spawn flag), so a change re-spawns in place with the flag
+   * (mirroring the dontAsk/bypass mode path), idle-guarded, with the R3.7 failure path and R3.8 latch.
+   * A no-op change applies nothing. Throwing here leaves the caller's applyConfigOptionValue unrun, so
+   * the prior currentValue is left unchanged on failure (R3.7).
+   */
+  private async applyEffortChange(sessionId: string, session: Session, level: string): Promise<void> {
+    if (level === this.currentEffort(session)) return; // no value change → no-op
+    if (session.turnDetector !== undefined || session.respawning) {
+      throw new Error(
+        "Cannot change effort while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
+      );
+    }
+    await this.respawnSession(sessionId, session, { effortLevel: level });
+  }
+
+  /**
+   * Story 046 (R4.1/R4.2/R4.3, design §8) — reconcile the `mode` configOption from the latest
+   * permission-mode event in the exactly-once `messages` slice. Emits current_mode_update EXACTLY ONCE
+   * and only when the transcript's mode differs from the advertised currentModeId (no spurious emit when
+   * already in sync, or when no permission-mode event is present). Model/effort have no transcript drift
+   * event, so they are NOT reconciled here — optimistic-on-apply only (R4.3).
+   */
+  private async reconcileModeFromTranscript(
+    sessionId: string,
+    session: Session,
+    messages: SessionMessage[],
+  ): Promise<void> {
+    let latestMode: string | undefined;
+    for (const m of messages) {
+      const w = m as { type?: string; permissionMode?: unknown };
+      if (w.type === "permission-mode" && typeof w.permissionMode === "string") {
+        latestMode = w.permissionMode;
+      }
+    }
+    if (latestMode === undefined || latestMode === session.modes.currentModeId) return;
+    session.modes = { ...session.modes, currentModeId: latestMode };
+    session.configOptions = session.configOptions.map((o) =>
+      o.id === "mode" && typeof o.currentValue === "string" ? { ...o, currentValue: latestMode } : o,
+    );
+    await this.client.sessionUpdate({
+      sessionId,
+      update: { sessionUpdate: "current_mode_update", currentModeId: latestMode },
+    });
   }
 
   private async replaySessionHistory(sessionId: string): Promise<void> {
@@ -1515,10 +1801,7 @@ export class ClaudeAcpAgent implements Agent {
         ) {
           const toolCallId = (block as { tool_use_id: string }).tool_use_id;
           const name = toolUseCache[toolCallId]?.name;
-          const diffUpdate = diffToolCallUpdate(
-            classifyDiffSource(name, toolUseResult),
-            toolCallId,
-          );
+          const diffUpdate = diffToolCallUpdate(classifyDiffSource(name, toolUseResult), toolCallId);
           if (diffUpdate) {
             await this.client.sessionUpdate({
               sessionId,
@@ -1667,10 +1950,7 @@ export class ClaudeAcpAgent implements Agent {
         // (e.g. a tool_use's `prompt`, or a tool_result's rendered output).
         const acc: ToolCallContent[] = [];
         if (typeof u.title === "string" && u.title.length > 0) {
-          acc.push({
-            type: "content",
-            content: { type: "text", text: `**${u.title}**` },
-          } as ToolCallContent);
+          acc.push({ type: "content", content: { type: "text", text: `**${u.title}**` } } as ToolCallContent);
         }
         if (Array.isArray(u.content)) {
           for (const item of u.content) acc.push(item as ToolCallContent);
@@ -1751,6 +2031,16 @@ export class ClaudeAcpAgent implements Agent {
       for (const m of fed) registerGateToolUses(m, session.gate);
     }
 
+    // === SEAM(046) §8 — reconcile the `mode` configOption from transcript permission-mode events.
+    // `permission-mode` is lifecycle-classified (event-switch.ts) and emits no SessionUpdate of its own,
+    // and there is no other transcript-driven mode consumer — so intercept it HERE, over the SAME
+    // exactly-once `fed` slice the detector/gate consume. If the latest permission-mode event's mode
+    // differs from the advertised currentModeId, reconcile the mode configOption currentValue and emit
+    // current_mode_update EXACTLY ONCE (covers a manual Shift+Tab in a mirrored TUI, plan-approval, and
+    // the R3.4 re-spawn). Model and effort have NO transcript drift event — they stay optimistic-on-apply
+    // (R4.3, documented). Additive: it never blocks the emit loop below.
+    await this.reconcileModeFromTranscript(sessionId, session, fed);
+
     // === SEAM(041) §sidechain — source + merge + linearize + emit (BOTH main turns and nested
     // sub-agent rows). Factored into the shared {@link emitLinearizedWithNested} so the `session/load`
     // replay path (`replaySessionHistory`) runs the IDENTICAL loop — loaded == live with no replay-only
@@ -1783,11 +2073,7 @@ export class ClaudeAcpAgent implements Agent {
           schedule: this.schedule,
           onActivity: async () => {
             session.turnDetector?.noteActivity();
-            await this.emitLinearizedWithNested(
-              sessionId,
-              session,
-              session.lastMessages ?? messages,
-            );
+            await this.emitLinearizedWithNested(sessionId, session, session.lastMessages ?? messages);
           },
         });
       } else if (session.subagentWatcher) {
@@ -2074,6 +2360,16 @@ export class ClaudeAcpAgent implements Agent {
     });
     await settingsManager.initialize();
 
+    // Story 046 (R3.1/R3.6, choose-before-start): seed the permission mode from
+    // settings.permissions.defaultMode, normalized through resolvePermissionMode (returns "default"
+    // on undefined/invalid AND strips bypassPermissions under the root guard — so R3.1 reconciles
+    // with R3.6). Drives both the spawn flag (--permission-mode, fresh path) and the advertised
+    // currentModeId, replacing the old hardcoded "default".
+    const seededMode = resolvePermissionMode(
+      settingsManager.getSettings().permissions?.defaultMode,
+      this.logger,
+    );
+
     // Per-session task state — still surfaced via plan notifications by the Group 2 pump / hooks.
     const taskState: TaskState = new Map();
 
@@ -2108,6 +2404,9 @@ export class ClaudeAcpAgent implements Agent {
         replayOnly: creationOpts.replayOnly,
         sessions: this.engines,
         onEvent: (sid) => void this.pumpUpdates(sid),
+        // Story 046 (R3.1/R3.2): seed the fresh spawn with the resolved permission mode (the resume
+        // path's mode is carried by the R3.4 re-spawn argv, not here).
+        permissionMode: seededMode,
         // Story 034: the gate's scratch settings file, consumed as `--settings "<file>"` (fresh path).
         settingsFile: gate?.settingsPath,
       });
@@ -2143,16 +2442,19 @@ export class ClaudeAcpAgent implements Agent {
       started.pty.onExit(() => void boundGate.teardown());
     }
 
-    // Static Degrau-1 model/mode/config defaults (the TUI owns real selection in Degrau-1).
-    const availableModes = buildAvailableModes(DEGRAU1_DEFAULT_MODEL_INFO);
+    // Story 046: advertise the full curated model catalog (was a single static "Default" entry),
+    // with the current model seeded to the safe `default`. Populating the catalog also unlocks the
+    // effort selector via buildConfigOptions (§5/§7). The current MODE is still seeded "default" here;
+    // Task 4.1 reseeds it from settings.permissions.defaultMode.
+    const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO);
     const modes: SessionModeState = {
-      currentModeId: "default",
+      currentModeId: seededMode,
       availableModes,
     };
     const configOptions = buildConfigOptions(
       modes,
-      DEGRAU1_DEFAULT_MODEL_INFO.value,
-      [DEGRAU1_DEFAULT_MODEL_INFO],
+      DEFAULT_MODEL_INFO.value,
+      MODEL_CATALOG,
       settingsManager.getSettings().effortLevel,
     );
 
@@ -2180,10 +2482,10 @@ export class ClaudeAcpAgent implements Agent {
         cachedWriteTokens: 0,
       },
       modes,
-      modelInfos: [DEGRAU1_DEFAULT_MODEL_INFO],
+      modelInfos: MODEL_CATALOG,
       configOptions,
       contextWindowSize:
-        inferContextWindowFromModel(DEGRAU1_DEFAULT_MODEL_INFO.value) ?? DEFAULT_CONTEXT_WINDOW,
+        inferContextWindowFromModel(DEFAULT_MODEL_INFO.value) ?? DEFAULT_CONTEXT_WINDOW,
       taskState,
       gate,
     };
@@ -2233,7 +2535,8 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
     {
       id: "dontAsk",
       name: "Don't Ask",
-      description: "Don't prompt for permissions, deny if not pre-approved",
+      description:
+        "Don't prompt for permissions, deny if not pre-approved. Selecting this restarts the session.",
     },
   );
 
@@ -2241,7 +2544,7 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
     modes.push({
       id: "bypassPermissions",
       name: "Bypass Permissions",
-      description: "Bypass all permission checks",
+      description: "Bypass all permission checks. Selecting this restarts the session.",
     });
   }
 
@@ -2934,6 +3237,7 @@ export function runAcp(deps?: AgentDeps) {
   }, stream);
   return { connection, agent };
 }
+
 
 /** Best-effort first guess of a model's context window from its ID, used only
  *  until a `result` message arrives with the authoritative `modelUsage` value.

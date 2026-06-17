@@ -101,14 +101,23 @@ export function resolveShell(baseEnv: Record<string, string | undefined> = proce
  * billing). The path is double-quoted so it survives the `-lc` shell word-splitting.
  * Like `--permission-mode plan`, this flag changes only TUI behavior — it adds no
  * `-p`/`stream-json`, so billing stays subscription `cli` (§10).
+ *
+ * Story 046 (R3.2): the `planMode` boolean seam is GENERALIZED to a `permissionMode` string. A
+ * non-"default" mode is emitted as `--permission-mode <mode>`; "default"/undefined emit nothing;
+ * `permissionMode: "plan"` reproduces the old planMode=true path. Still interactive-only — adds no
+ * `-p`/`stream-json`, billing stays subscription `cli`.
  */
 export function buildClaudeCmd(
   sessionId: string,
-  planMode?: boolean,
+  permissionMode?: string,
   settingsFile?: string,
+  effortLevel?: string,
 ): string {
   let cmd = `claude --session-id ${sessionId}`;
-  if (planMode) cmd += " --permission-mode plan";
+  if (permissionMode && permissionMode !== "default") cmd += ` --permission-mode ${permissionMode}`;
+  // Story 046 (R2.2): effort is a spawn flag (Probe B verdict — no live mid-session path), so a
+  // non-"default" level is seeded/re-spawned with `--effort <level>`. Interactive-only — no credit path.
+  if (effortLevel && effortLevel !== "default") cmd += ` --effort ${effortLevel}`;
   if (settingsFile) cmd += ` --settings "${settingsFile}"`;
   return cmd;
 }
@@ -121,10 +130,11 @@ export function buildClaudeCmd(
  */
 export function buildSpawnArgv(
   sessionId: string,
-  planMode?: boolean,
+  permissionMode?: string,
   settingsFile?: string,
+  effortLevel?: string,
 ): [string, string] {
-  return ["-lc", buildClaudeCmd(sessionId, planMode, settingsFile)];
+  return ["-lc", buildClaudeCmd(sessionId, permissionMode, settingsFile, effortLevel)];
 }
 
 /** Options for {@link spawnClaudePty}. */
@@ -139,11 +149,16 @@ export interface SpawnPtyOptions {
    */
   spawn?: typeof pty.spawn;
   /**
-   * When true, adds `--permission-mode plan` to the spawn command (story 029 / R4.1).
-   * Prefer this over the interactive Shift+Tab cycle (`\x1b[Z`), which is the §5-appendix
-   * UNTESTED fallback and is documented, not wired as primary (R4.2/R4.3).
+   * Story 046 (R3.2): a non-"default" permission mode adds `--permission-mode <mode>` to the spawn
+   * command (generalizes the story-029 planMode=plan seam). `"plan"` reproduces the old planMode
+   * path. Interactive-only — adds no `-p`/`stream-json`; billing stays subscription `cli`.
    */
-  planMode?: boolean;
+  permissionMode?: string;
+  /**
+   * Story 046 (R2.2): a non-"default" reasoning effort adds `--effort <level>` to the spawn command
+   * (Probe B verdict — effort has no live mid-session path, so it is seeded/re-spawned). Interactive-only.
+   */
+  effortLevel?: string;
   /**
    * Story 034 (§9 hybrid gate): absolute path of the per-session SCRATCH settings file
    * carrying the fork's `PreToolUse` hook; appended as `--settings "<file>"`. The file
@@ -179,11 +194,12 @@ export interface PtyEngineHandle {
  * process-supervisor or non-PTY spawn variant is introduced.
  */
 export function spawnClaudePty(opts: SpawnPtyOptions): PtyEngineHandle {
-  const { cwd, baseEnv = process.env, spawn = pty.spawn, planMode, settingsFile } = opts;
+  const { cwd, baseEnv = process.env, spawn = pty.spawn, permissionMode, settingsFile, effortLevel } =
+    opts;
 
   const sessionId = randomUUID(); // pre-generated → correlates to the JSONL transcript
   const shell = resolveShell(baseEnv);
-  const argv = buildSpawnArgv(sessionId, planMode, settingsFile);
+  const argv = buildSpawnArgv(sessionId, permissionMode, settingsFile, effortLevel);
 
   // Sanitized, subscription-billing env (§5/§10) via the single shared definition.
   const env = buildSanitizedEnv(baseEnv);

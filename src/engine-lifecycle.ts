@@ -266,9 +266,22 @@ const RESUME_PTY_NAME = "xterm-256color";
  * `|| claude` makes a FAILED `--resume` fall back to a fresh interactive session rather than
  * hanging. The id is double-quoted so it survives shell word-splitting. There is deliberately
  * NO `-p`/`--print`/`stream-json` — those select the SDK/credit non-interactive path.
+ *
+ * Story 046 (R3.4): an optional non-"default" `permissionMode` is carried into BOTH the `--resume`
+ * launch AND the `|| claude` fresh fallback as `--permission-mode <mode>`, so an in-place re-spawn
+ * (a dontAsk/bypass switch) reattaches the SAME sessionId/transcript under the new mode. Still no
+ * `-p`/`--print`/`stream-json` — billing stays subscription `cli`.
  */
-export function buildResumeArgv(sessionId: string): [string, string] {
-  return ["-c", `claude --resume "${sessionId}" || claude`];
+export function buildResumeArgv(
+  sessionId: string,
+  permissionMode?: string,
+  effortLevel?: string,
+): [string, string] {
+  const pm =
+    permissionMode && permissionMode !== "default" ? ` --permission-mode ${permissionMode}` : "";
+  const ef = effortLevel && effortLevel !== "default" ? ` --effort ${effortLevel}` : "";
+  const flags = `${pm}${ef}`;
+  return ["-c", `claude --resume "${sessionId}"${flags} || claude${flags}`];
 }
 
 /** Options for {@link spawnResumePty}. */
@@ -281,6 +294,13 @@ export interface SpawnResumeOptions {
   baseEnv?: Record<string, string | undefined>;
   /** Injectable spawn function (defaults to node-pty's `spawn`); tests pass a fake. */
   spawn?: typeof pty.spawn;
+  /**
+   * Story 046 (R3.4): carry `--permission-mode <mode>` into the resume argv for an in-place re-spawn
+   * (a dontAsk/bypass switch). Non-"default" only; preserves the same sessionId/transcript.
+   */
+  permissionMode?: string;
+  /** Story 046 (R2.2): carry `--effort <level>` into the resume argv for an effort re-spawn. */
+  effortLevel?: string;
 }
 
 /**
@@ -295,7 +315,7 @@ export function spawnResumePty(opts: SpawnResumeOptions): PtyEngineHandle {
   const { sessionId, cwd, baseEnv = process.env, spawn = pty.spawn } = opts;
 
   const shell = resolveShell(baseEnv);
-  const argv = buildResumeArgv(sessionId);
+  const argv = buildResumeArgv(sessionId, opts.permissionMode, opts.effortLevel);
   const env = buildSanitizedEnv(baseEnv);
 
   // §10 refuse-to-spawn guard (R4.2): abort if any forbidden billing var survived sanitization,
@@ -321,6 +341,13 @@ export interface CreateSessionEngineOptions {
   baseEnv?: Record<string, string | undefined>;
   /** Injectable spawn function (defaults to node-pty's `spawn`); tests pass a fake. */
   spawn?: typeof pty.spawn;
+  /**
+   * Story 046 (R3.2): forwarded to {@link spawnClaudePty} as `--permission-mode <mode>` for a fresh
+   * spawn seeded to a non-"default" mode. Absent/"default" → no flag (byte-for-byte pre-046 spawn).
+   */
+  permissionMode?: string;
+  /** Story 046 (R2.2): forwarded to {@link spawnClaudePty} as `--effort <level>` for a non-"default" seed. */
+  effortLevel?: string;
   /**
    * Story 034 (§9 hybrid gate): per-session SCRATCH settings file carrying the fork's
    * `PreToolUse` hook, forwarded to {@link spawnClaudePty} as `--settings "<file>"`. The
@@ -375,6 +402,8 @@ export function createSessionEngine(opts: CreateSessionEngineOptions): SessionEn
     cwd: opts.cwd,
     baseEnv: opts.baseEnv,
     spawn: opts.spawn,
+    permissionMode: opts.permissionMode,
+    effortLevel: opts.effortLevel,
     settingsFile: opts.settingsFile,
   });
   // ONE watcher, started by the story 015 factory and bound to that same PTY.
