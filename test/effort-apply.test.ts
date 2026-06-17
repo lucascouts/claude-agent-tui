@@ -61,7 +61,7 @@ async function newSession(
     createSession: (p: unknown) => Promise<{ sessionId: string }>;
   }).createSession({ cwd: "/work/dir", mcpServers: [] });
   const sessions = (agent as unknown as {
-    sessions: Record<string, { configOptions: Array<{ id: string; currentValue?: unknown }> }>;
+    sessions: Record<string, { configOptions: Array<{ id: string; currentValue?: unknown }>; interacted?: boolean }>;
   }).sessions;
   return { agent, sessionId: response.sessionId, sessions };
 }
@@ -78,7 +78,8 @@ const effortCurrentValue = (
 
 test("3.2 idle + effort change → re-spawns the SAME sessionId (R2.2, Probe-B re-spawn path)", async (t) => {
   const fake = makeStartEngine();
-  const { agent, sessionId } = await newSession(t, fake.startEngine);
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  sessions[sessionId].interacted = true; // R3.4 guard: a re-spawn is only allowed AFTER the first interaction
   // Surface the effort option by selecting an effort-capable model (a /model inject, NOT a re-spawn).
   await setOption(agent, sessionId, "model", "sonnet");
   const callsBeforeEffort = fake.calls.length;
@@ -99,6 +100,7 @@ test("3.2 an effort re-spawn FAILURE surfaces the error and leaves the prior cur
   // re-spawn is call 2 → fail it.
   const fake = makeStartEngine({ failOnCall: 2 });
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  sessions[sessionId].interacted = true; // R3.4 guard: reach the re-spawn (the failure under test), not the guard
   await setOption(agent, sessionId, "model", "sonnet");
   const before = effortCurrentValue(sessions, sessionId);
   await assert.rejects(

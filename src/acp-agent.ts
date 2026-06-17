@@ -228,6 +228,15 @@ type Session = {
    */
   respawning?: boolean;
   /**
+   * Story 046 (R3.4 LIVE FIX) — true once the session's transcript has materialised (the watcher armed
+   * and pumped at least once, i.e. the FIRST interaction happened). An in-place re-spawn reattaches via
+   * `claude --resume <id>`, which needs that transcript to exist; before it, --resume falls back
+   * (buildResumeArgv `|| claude`) to a NEW untracked id and stalls. {@link respawnSession} refuses while
+   * this is falsy — a boot-time default_config_options dontAsk/bypass stays at the fresh spawn's mode
+   * until the user sends the first prompt.
+   */
+  interacted?: boolean;
+  /**
    * Story 034 (§9 / R3.3) — the per-session HYBRID permission-gate runtime: loopback `PreToolUse`
    * hook server + scratch `--settings` backup + `tool_use.id` correlator. Present only when the
    * gate is enabled AND the session spawned fresh (resume/replay paths carry no gate). The live
@@ -338,6 +347,17 @@ export interface StartEngineArgs {
    * <level>` (non-"default" only). Threaded to BOTH the fresh and resume spawn paths.
    */
   effortLevel?: string;
+  /**
+   * Story 046 (R3.4 LIVE FIX): this resume is an IN-PLACE re-spawn ({@link respawnSession} for a
+   * dontAsk/bypass mode or an effort change), NOT a fork/resume of an already-lived session. An
+   * in-place re-spawn can fire BEFORE the first interaction (e.g. a boot-time `bypassPermissions`
+   * switch driven by Zed's `default_config_options`), when the re-spawned `claude` has NOT written its
+   * transcript yet. So this branch DEFERS discovery like the fresh path (`watchdogMs: Infinity`,
+   * arm-on-appearance) instead of the resume default's 2000ms FATAL watchdog — which would otherwise
+   * throw not-found and stall the next turn until the 120s turn watchdog. The fork/resume path (flag
+   * absent) keeps its blocking 2000ms watchdog (R2.1, resume-discovery-unchanged.test.ts).
+   */
+  inPlaceRespawn?: boolean;
 }
 
 /** The createSession injection seam: spawn the PTY engine + JSONL watcher + locate the transcript. */
@@ -485,6 +505,52 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       permissionMode: args.permissionMode,
       effortLevel: args.effortLevel,
     });
+    if (args.inPlaceRespawn) {
+      // === SEAM(046 R3.4 LIVE FIX): DEFER discovery for an in-place re-spawn ======================
+      // An in-place re-spawn (respawnSession: dontAsk/bypass or effort) can fire BEFORE the first
+      // interaction — e.g. Zed sends set_config_option(mode:bypassPermissions) at boot from
+      // default_config_options, so the re-spawned `claude` has not written its transcript yet. The
+      // blocking 2000ms watchdog below would then throw not-found, fail the re-spawn, and the next
+      // turn would stall until the 120s turn watchdog. Mirror the fresh path: return as soon as the
+      // PTY is live and discover in the BACKGROUND under watchdogMs:Infinity (cancellable), arming the
+      // watcher + firing the first onEvent only when the transcript APPEARS (the first interaction).
+      const engine = new SessionEngine({ handle, watcher: undefined, sessions: args.sessions });
+      const ac = new AbortController();
+      engine.setPendingDiscovery(ac);
+      void (async () => {
+        try {
+          const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId!, {
+            watchdogMs: Infinity,
+            ...args.locateOptions,
+            signal: ac.signal,
+          });
+          const watcher = createJsonlWatcher({
+            sessionId: args.sessionId!,
+            transcriptPath,
+            dir: cwd ?? args.cwd,
+            onEvent: () => args.onEvent?.(args.sessionId!),
+          });
+          engine.watcher = watcher;
+          args.onEvent?.(args.sessionId!);
+        } catch (err) {
+          // Swallow ONLY the abort sentinel (the session was torn down before any interaction).
+          // SURFACE everything else (multi-match ambiguity, IO error) — never silently drop it.
+          if ((err as { name?: string } | undefined)?.name === "AbortError") return;
+          console.error(
+            `[acp-agent] in-place re-spawn transcript discovery failed for ${args.sessionId}:`,
+            err,
+          );
+        }
+      })();
+      return {
+        sessionId: args.sessionId,
+        pty: handle.pty,
+        watcher: undefined,
+        engine,
+        cwd: args.cwd,
+      };
+    }
+
     const { transcriptPath, cwd } = await resolveWatchTarget(args.sessionId, {
       ...args.locateOptions,
     });
@@ -1665,6 +1731,18 @@ export class ClaudeAcpAgent implements Agent {
     session: Session,
     change: { permissionMode?: string; effortLevel?: string },
   ): Promise<void> {
+    // Story 046 (R3.4 LIVE FIX guard): a re-spawn reattaches via `claude --resume <id>`, which needs the
+    // transcript to ALREADY exist. Before the first interaction it is absent, so --resume falls back
+    // (buildResumeArgv `|| claude`) to a NEW id the fork no longer tracks — stalling the turn until the
+    // 120s watchdog AND discarding the live fresh PTY. Refuse until the session has interacted at least
+    // once. The user/Zed retries after the first prompt; a boot-time default_config_options dontAsk/
+    // bypass therefore stays at the fresh spawn's mode (use a fresh-spawn --permission-mode seed for
+    // start-in-bypass, a documented follow-up). The OTHER selector's currentValue is left unchanged.
+    if (!session.interacted) {
+      throw new Error(
+        "Cannot switch to a re-spawn mode/effort before the first interaction (no transcript to resume yet); send a prompt first, then switch.",
+      );
+    }
     session.respawning = true;
     try {
       const oldEngine = session.engine;
@@ -1678,6 +1756,9 @@ export class ClaudeAcpAgent implements Agent {
         sessionId,
         cwd: session.cwd,
         resume: true,
+        // Story 046 (R3.4 LIVE FIX): an in-place re-spawn may run before the first interaction (boot
+        // bypass), so DEFER discovery instead of the 2000ms fatal watchdog — see defaultStartEngine.
+        inPlaceRespawn: true,
         permissionMode,
         effortLevel,
         sessions: this.engines,
@@ -2021,6 +2102,12 @@ export class ClaudeAcpAgent implements Agent {
   private async pumpUpdates(sessionId: string): Promise<void> {
     const session = this.sessions[sessionId];
     if (!session) return; // watcher fired before the handle was registered, or after teardown
+
+    // Story 046 (R3.4 LIVE FIX): the pump only fires once the watcher has armed against the REAL
+    // transcript, so reaching here proves the transcript exists (the first interaction happened). Mark
+    // it idempotently — respawnSession gates the --resume re-spawn on this (a pre-interaction re-spawn
+    // would --resume a non-existent transcript and fall back to a new untracked id).
+    session.interacted = true;
 
     const messages = await readOrderedMessages(sessionId, session.cwd, {
       getMessages: this.getMessages,

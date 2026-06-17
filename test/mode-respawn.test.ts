@@ -72,7 +72,7 @@ async function newSession(
     createSession: (p: unknown) => Promise<{ sessionId: string }>;
   }).createSession({ cwd: "/work/dir", mcpServers: [] });
   const sessions = (agent as unknown as {
-    sessions: Record<string, { configOptions: Array<{ id: string; currentValue?: unknown }>; modes: { currentModeId: string } }>;
+    sessions: Record<string, { configOptions: Array<{ id: string; currentValue?: unknown }>; modes: { currentModeId: string }; interacted?: boolean }>;
   }).sessions;
   return { agent, sessionId: response.sessionId, sessions };
 }
@@ -94,6 +94,7 @@ const modeCurrentValue = (
 test("4.4 idle + dontAsk → re-spawns the SAME sessionId (key unchanged, transcript preserved) (R3.4)", async (t) => {
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  sessions[sessionId].interacted = true; // R3.4 guard: a re-spawn is only allowed AFTER the first interaction
   await setMode(agent, sessionId, "dontAsk");
   assert.ok(sessions[sessionId], "the session must still be keyed under the SAME sessionId after re-spawn (R3.4)");
   assert.ok(
@@ -109,7 +110,8 @@ test("4.4 idle + dontAsk → re-spawns the SAME sessionId (key unchanged, transc
 
 test("Bug A: set_config_option(mode='dontAsk') re-spawns too — the path Zed uses must drive, not no-op", async (t) => {
   const fake = makeStartEngine();
-  const { agent, sessionId } = await newSession(t, fake.startEngine);
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  sessions[sessionId].interacted = true; // R3.4 guard: a re-spawn is only allowed AFTER the first interaction
   // Zed sends mode changes via set_config_option(configId:"mode"); this path was read-only (Bug A).
   await setOptionMode(agent, sessionId, "dontAsk");
   assert.ok(
@@ -122,6 +124,7 @@ test("4.4 a re-spawn FAILURE surfaces the error and leaves the prior mode curren
   // Fail on the 2nd startEngine call (the re-spawn). The createSession spawn (call 1) succeeds.
   const fake = makeStartEngine({ failOnCall: 2 });
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  sessions[sessionId].interacted = true; // R3.4 guard: reach the re-spawn (the failure under test), not the guard
   const before = modeCurrentValue(sessions, sessionId);
   await assert.rejects(
     setMode(agent, sessionId, "dontAsk"),
@@ -136,4 +139,32 @@ test("4.4 a re-spawn FAILURE surfaces the error and leaves the prior mode curren
     sessions[sessionId],
     "a failed re-spawn must not leave the session torn-down-without-replacement (R3.7)",
   );
+});
+
+test("R3.4 LIVE FIX guard: dontAsk BEFORE the first interaction does NOT re-spawn (no --resume of a missing transcript)", async (t) => {
+  // The live bug: a boot-time default_config_options.mode=bypassPermissions made Zed send the switch
+  // before any interaction. The re-spawn's `claude --resume <id>` then has no transcript, falls back
+  // (`|| claude`) to a NEW untracked id, and stalls the next turn until the 120s watchdog — after
+  // killing the live fresh PTY. The guard refuses while `interacted` is falsy: no 2nd startEngine call,
+  // the prior currentValue is untouched, and the error tells the user to send a prompt first.
+  const fake = makeStartEngine();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  // NOTE: interacted is intentionally NOT set — this is the pre-first-interaction (boot) state.
+  const before = modeCurrentValue(sessions, sessionId);
+  await assert.rejects(
+    setMode(agent, sessionId, "dontAsk"),
+    /before the first interaction/,
+    "a pre-interaction re-spawn must be refused with a clear message (R3.4 guard)",
+  );
+  assert.equal(
+    fake.calls.length,
+    1,
+    "the guard must NOT trigger a re-spawn — only the createSession spawn (1 call), no 2nd startEngine",
+  );
+  assert.equal(
+    modeCurrentValue(sessions, sessionId),
+    before,
+    "a refused re-spawn must leave the prior mode currentValue unchanged",
+  );
+  assert.ok(sessions[sessionId], "the live fresh session/PTY must remain intact (not discarded)");
 });
