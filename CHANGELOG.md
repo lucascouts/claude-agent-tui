@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.3.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.2.2...v0.3.0) (2026-06-19)
+
+
+### Features
+
+* live Agent Panel selectors (model/effort/permission-mode) + model-switch hang fix ([b1c56d4](https://github.com/lucascouts/claude-agent-tui/commit/b1c56d4804ece8574feee4fca1e6c20784b7fe48))
+
+
+### Bug Fixes
+
+* **046:** defer discovery + guard for in-place re-spawn (live boot-bypass stall) ([cd6ac2e](https://github.com/lucascouts/claude-agent-tui/commit/cd6ac2e4768ae2b878b824e67e4cf5fd184dcca9))
+* **046:** permission mode drives the TUI + gate honors mode (Bug A) ([4826257](https://github.com/lucascouts/claude-agent-tui/commit/482625775ec35e239a6d40c64925e57f3d5a0139))
+* **deps:** treat BetaFallbackBlock as no-op (@anthropic-ai/sdk 0.104) ([bdfff4b](https://github.com/lucascouts/claude-agent-tui/commit/bdfff4b613c157bcaf191a2cd808eb23bf23af53))
+
 ## [0.2.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.2.1...v0.2.2) (2026-06-13)
 
 
