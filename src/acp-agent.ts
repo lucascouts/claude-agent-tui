@@ -3276,10 +3276,9 @@ export function toAcpNotifications(
       case "compaction_delta":
       case "advisor_tool_result":
       case "mid_conv_system":
-      // Model-fallback marker (@anthropic-ai/sdk >= 0.104): pure routing metadata
-      // (from/to model hops), no renderable content → no-op like the control
-      // blocks above.
       case "fallback":
+        // `fallback`: model-routing marker (@anthropic-ai/sdk >= 0.104) — from/to
+        // model hops, no renderable content. No-op like the control blocks above.
         break;
 
       default:
