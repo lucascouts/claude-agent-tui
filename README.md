@@ -14,6 +14,12 @@ In practice, Zed's built-in Claude integration now draws from those expensive th
 
 This project bridges the two: it drives the **official Claude Code TUI** over a PTY and exposes it through the **ACP** protocol, so Zed renders it as a native agent panel — giving you the full Claude Code experience inside Zed **on your existing subscription**, not API credits.
 
+### Update notice
+
+"Update June 15: We're pausing the changes to Claude Agent SDK usage described below. For now, nothing has changed: Claude Agent SDK, claude -p, and third-party app usage still draw from your subscription's usage limits. The previously announced monthly credit, which would have been available to eligible claimants in connection with these changes, isn't available. We’re working to update the plan to better support how users build with Claude subscriptions. When we have an update, we'll share it before anything takes effect."
+
+[`https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan`](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan)
+
 > Not affiliated with or endorsed by Anthropic or Zed Industries. Use of the `claude` CLI remains subject to Anthropic's terms.
 
 ## Requirements
