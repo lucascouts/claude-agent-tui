@@ -19,8 +19,8 @@ test("fork install: @agentclientprotocol/sdk resolves to exactly 0.25.0 (R3.1)",
   assert.equal(installedVersion("@agentclientprotocol/sdk"), "0.25.0");
 });
 
-test("fork install: @anthropic-ai/claude-agent-sdk resolves to exactly 0.3.166 (R3.1)", () => {
-  assert.equal(installedVersion("@anthropic-ai/claude-agent-sdk"), "0.3.166");
+test("fork install: @anthropic-ai/claude-agent-sdk resolves to exactly 0.3.175 (R3.1)", () => {
+  assert.equal(installedVersion("@anthropic-ai/claude-agent-sdk"), "0.3.175");
 });
 
 test("fork install: node-pty is installed with no version conflict (R3.1)", () => {

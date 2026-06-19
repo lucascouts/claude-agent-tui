@@ -21,8 +21,8 @@ test("fork deps: @agentclientprotocol/sdk pinned exactly to 0.25.0, no range (R2
   assert.doesNotMatch(deps["@agentclientprotocol/sdk"] ?? "", /[\^~]/);
 });
 
-test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.166, no range (R2.2)", () => {
-  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.166");
+test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.175, no range (R2.2)", () => {
+  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.175");
   assert.doesNotMatch(deps["@anthropic-ai/claude-agent-sdk"] ?? "", /[\^~]/);
 });
 
