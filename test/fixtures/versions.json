@@ -22,6 +22,30 @@
         "entrypoint='cli' is in the §10 SUBSCRIPTION_ENTRYPOINTS set (subscription billing).",
         "message.content for a text turn is an ARRAY of content blocks (the modern shape)."
       ]
+    },
+    {
+      "version": "2.1.176",
+      "path": "v2.1.176/session.jsonl",
+      "synthetic": true,
+      "basis": "Synthesized to be FAITHFUL to the documented 2.1.159->2.1.176 changelog deltas (story 050 REBASE-AND-DRIFT.md, binary axis 2.1.159->2.1.186). No real 2.1.176 capture exists in this repo; this set is DERIVED, carrying the modern 'cli' subscription taxonomy and the array content shape unchanged from 2.1.159.",
+      "entrypoint": "cli",
+      "driftNotes": [
+        "entrypoint='cli' remains in the §10 SUBSCRIPTION_ENTRYPOINTS set — no billing-taxonomy drift vs 2.1.159.",
+        "behavioural: subagent-of-subagent nesting context was introduced around 2.1.172 (sub-sidechains can themselves spawn) — the JSONL parentUuid/parentToolUseId shape is unchanged; only the depth the linearizer may see grows.",
+        "permission-rule syntax churn lands just after (approx 2.1.178) — not reflected in this synthetic transcript (out of scope: this story detects, it does not act)."
+      ]
+    },
+    {
+      "version": "2.1.185",
+      "path": "v2.1.185/session.jsonl",
+      "synthetic": true,
+      "basis": "Synthesized to be FAITHFUL to the documented 2.1.176->2.1.185 changelog deltas (story 050 REBASE-AND-DRIFT.md). No real 2.1.185 capture exists; this set is DERIVED. 2.1.185 is the version the live machine ran when story 049 was authored (it has since drifted to 2.1.186 — the thesis in action).",
+      "entrypoint": "cli",
+      "driftNotes": [
+        "entrypoint='cli' remains subscription — no billing-taxonomy drift vs 2.1.159.",
+        "behavioural: stall-hint timing was tuned around this range (the watchdog/idle-hint cadence) — a timing concern, not a JSONL-shape or stop_reason change; the reduced-shape keys and stop_reason taxonomy are unchanged.",
+        "the live binary kept moving (2.1.185 -> 2.1.186 within days), which is exactly the undetected drift this story makes observable."
+      ]
     }
   ]
 }

@@ -157,10 +157,14 @@ async function runHarness(
 
 // === R3.1 / R3.3 — both version sets are exercised by all three units ==========================
 
-test("harness runs translator + guard-rail + linearization against BOTH version sets (R3.1, R3.3)", async () => {
-  const report = await runHarness(loadManifest());
-  assert.deepEqual(report.versionsExercised.sort(), ["2.1.121", "2.1.159"], "both versions exercised");
-  for (const v of ["2.1.121", "2.1.159"]) {
+test("harness runs translator + guard-rail + linearization against ALL manifest version sets (R3.1, R3.3)", async () => {
+  const manifest = loadManifest();
+  const report = await runHarness(manifest);
+  // R4.2 — derive the expected set from the manifest (was the literal ["2.1.121","2.1.159"]) so the
+  // 2.1.176/2.1.185 sets (story 049) are exercised too, each with translated/guarded/turns > 0.
+  const expected = manifest.map((e) => e.version).sort();
+  assert.deepEqual(report.versionsExercised.sort(), expected, "every manifest version exercised");
+  for (const v of expected) {
     assert.ok(report.perVersion[v].translated > 0, `${v}: translator ran on content events`);
     assert.ok(report.perVersion[v].guarded > 0, `${v}: guard-rail inspected billable events`);
     assert.ok(report.perVersion[v].turns > 0, `${v}: linearization produced turns`);
@@ -208,15 +212,20 @@ test("a synthetic injected unknown-type drift is logged non-fatally and attribut
   );
   assert.equal(injected.length, 1, "the injected unknown type is logged exactly once as a translator drift");
   assert.match(injected[0].detail, /future-unknown-type-2_2_0/, "the finding names the drifting type");
-  // the run still exercised BOTH versions — the drift did not short-circuit iteration.
-  assert.deepEqual(report!.versionsExercised.sort(), ["2.1.121", "2.1.159"]);
+  // the run still exercised every manifest version — the drift did not short-circuit iteration
+  // (R4.2 — derived from the manifest, was the literal ["2.1.121","2.1.159"]).
+  assert.deepEqual(report!.versionsExercised.sort(), loadManifest().map((e) => e.version).sort());
 });
 
 // === R3.3 — the report attributes every finding to a specific version ==========================
 
 test("every finding carries the version it belongs to (attributable) (R3.3)", async () => {
-  const report = await runHarness(loadManifest());
+  const manifest = loadManifest();
+  // R4.2 — the known-version set is DERIVED from the manifest (was the literal ["2.1.121","2.1.159"]),
+  // including the :220 membership check, so a finding on any manifest version stays attributable.
+  const known = new Set(manifest.map((e) => e.version));
+  const report = await runHarness(manifest);
   for (const f of report.findings) {
-    assert.ok(["2.1.121", "2.1.159"].includes(f.version), `finding ${f.kind} must name a known version, got ${f.version}`);
+    assert.ok(known.has(f.version), `finding ${f.kind} must name a known version, got ${f.version}`);
   }
 });

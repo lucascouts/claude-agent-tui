@@ -42,10 +42,16 @@ function setForVersion(version: string): Array<Record<string, unknown>> {
 
 // === R2.1 — both version sets exist under version-labelled paths ===============================
 
-test("both 2.1.121 and 2.1.159 fixture sets exist under version-labelled paths (R2.1)", () => {
-  for (const v of ["2.1.121", "2.1.159"]) {
-    const url = new URL(`./fixtures/v${v}/session.jsonl`, import.meta.url);
-    assert.ok(existsSync(fileURLToPath(url)), `v${v}/session.jsonl must exist`);
+test("every manifest version's fixture set exists under its version-labelled path (R2.1)", () => {
+  const { versions } = loadManifest();
+  // R4.2 — the two baseline anchors must remain; the rest is DERIVED from the manifest so new
+  // versions (2.1.176/2.1.185, story 049) are covered without re-listing a literal.
+  for (const b of ["2.1.121", "2.1.159"]) {
+    assert.ok(versions.some((v) => v.version === b), `baseline version ${b} must remain in the manifest`);
+  }
+  for (const v of versions) {
+    const url = new URL(`./fixtures/v${v.version}/session.jsonl`, import.meta.url);
+    assert.ok(existsSync(fileURLToPath(url)), `v${v.version}/session.jsonl must exist`);
   }
 });
 
@@ -54,9 +60,17 @@ test("both 2.1.121 and 2.1.159 fixture sets exist under version-labelled paths (
 test("each set is addressable by version label via versions.json (R2.3)", () => {
   const { versions } = loadManifest();
   const labels = versions.map((v) => v.version).sort();
-  assert.deepEqual(labels, ["2.1.121", "2.1.159"], "manifest must label exactly the two anchor versions");
+  // R4.2 — relaxed from the literal ["2.1.121","2.1.159"] to a superset/shape check so adding a
+  // version never reds this assert: the two anchors must remain, and every label is a valid x.y.z.
+  for (const b of ["2.1.121", "2.1.159"]) {
+    assert.ok(labels.includes(b), `manifest must still contain the anchor version ${b}`);
+  }
+  assert.ok(
+    labels.every((l) => /^\d+\.\d+\.\d+$/.test(l)),
+    `every manifest label must be an x.y.z version, got ${labels.join(", ")}`,
+  );
   // every line of each set carries its own version field too (self-labelled, not only via the index).
-  for (const v of ["2.1.121", "2.1.159"]) {
+  for (const v of labels) {
     const rows = setForVersion(v);
     assert.ok(rows.length > 0, `set ${v} resolves to >0 rows by label`);
     assert.ok(

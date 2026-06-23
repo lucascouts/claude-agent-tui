@@ -1,18 +1,16 @@
-// Story 012 / Task 2.1 (R1.3) — fail fast with a clear, location-naming error.
+// Story 049 / Task 4.1 (R1.3, R1.4, R5.3) — fail fast with a clear, PATH-naming error.
 //
-// When neither a PATH `claude` nor the documented native-binary fallback is
-// executable, resolveClaudePath() must throw an Error naming BOTH attempted
-// locations (the PATH lookup and the native-binary fallback) plus the install
-// hint — so a missing subscription CLI surfaces here, not as an opaque spawn
-// ENOENT deep in the PTY engine (story 013).
+// UPDATED for story 049: the hardcoded `2.1.159` native-binary fallback is REMOVED
+// (a version-specific path that almost certainly no longer exists is a silent dead
+// end). Resolution is now PATH-only; on a miss, resolveClaudePath() must throw an
+// Error naming the PATH lookup that was attempted plus the install hint — and must
+// NO LONGER mention any native-binary / `.vscode` fallback (R1.3). The fail-loud
+// contract (a missing CLI surfaces here, not as an opaque spawn ENOENT deep in the
+// PTY engine, story 013) is preserved minus the fallback clause.
 //
-// Determinism: PATH is pointed at an empty temp dir (no `claude`), and HOME at an
-// empty temp dir so os.homedir()'s native-binary fallback path is unreachable.
-// On POSIX, os.homedir() honors $HOME.
-//
-// Regression-guard note: the throw is part of the E1-validated helper ported in
-// task 1.2, so this contract already holds when this test is authored — it pins
-// the fail-fast behavior against future weakening rather than driving new code.
+// Determinism: PATH is pointed at an empty temp dir (no `claude`). HOME no longer
+// matters (the homedir-based fallback is gone) but is still stubbed empty so the
+// test is hermetic regardless of the host.
 //
 // node:test runner: `node --experimental-strip-types --test
 // test/claude-path-missing.test.ts`.
@@ -30,7 +28,7 @@ function withNoClaude(pathValue: string, fn: () => void): void {
   const emptyHome = mkdtempSync(join(tmpdir(), "claude-missing-home-"));
   try {
     process.env.PATH = pathValue;
-    process.env.HOME = emptyHome; // os.homedir() -> emptyHome; fallback unreachable
+    process.env.HOME = emptyHome; // hermetic — even though the homedir fallback is gone
     fn();
   } finally {
     if (savedPath === undefined) delete process.env.PATH;
@@ -41,7 +39,7 @@ function withNoClaude(pathValue: string, fn: () => void): void {
   }
 }
 
-test("missing (R1.3): throws naming BOTH the PATH lookup and the native-binary fallback", () => {
+test("missing (R1.4): throws naming the PATH lookup, with NO native-binary fallback clause (R1.3)", () => {
   const emptyPathDir = mkdtempSync(join(tmpdir(), "claude-missing-path-"));
   try {
     withNoClaude(emptyPathDir, () => {
@@ -52,11 +50,18 @@ test("missing (R1.3): throws naming BOTH the PATH lookup and the native-binary f
           assert.match(err.message, /PATH lookup/, "must name the PATH-lookup attempt");
           assert.match(
             err.message,
-            /native-binary fallback/,
-            "must name the native-binary fallback attempt",
+            /Install the Claude Code subscription CLI/,
+            "must give the install hint",
           );
-          assert.match(err.message, /\.vscode/, "must include the documented fallback path");
-          assert.match(err.message, /Install the Claude Code subscription CLI/, "must give the install hint");
+          // R1.3 — the fallback is GONE: the message must not point at it anymore.
+          assert.ok(
+            !/native-binary fallback/.test(err.message),
+            "must NOT mention the removed native-binary fallback",
+          );
+          assert.ok(
+            !/\.vscode/.test(err.message),
+            "must NOT mention the removed `.vscode` fallback path",
+          );
           assert.ok(
             !/claude-agent-sdk/.test(err.message),
             "must never point the user at the SDK-embedded binary",
@@ -70,14 +75,17 @@ test("missing (R1.3): throws naming BOTH the PATH lookup and the native-binary f
   }
 });
 
-test("missing (R1.3): empty PATH still fails fast naming both locations", () => {
+test("missing (R1.4): empty PATH still fails fast naming the PATH lookup (no fallback clause)", () => {
   withNoClaude("", () => {
     assert.throws(
       () => resolveClaudePath(),
       (err: unknown) => {
         assert.ok(err instanceof Error);
         assert.match(err.message, /PATH lookup over 0 entr/, "empty PATH => zero entries scanned");
-        assert.match(err.message, /native-binary fallback/);
+        assert.ok(
+          !/native-binary fallback/.test(err.message),
+          "must NOT mention the removed native-binary fallback",
+        );
         return true;
       },
     );
