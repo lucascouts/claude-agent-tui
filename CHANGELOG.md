@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.4.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.3.1...v0.4.0) (2026-06-23)
+
+
+### Features
+
+* **deps:** update dependency chain + clear advisories (mirror fork story 047) ([99be617](https://github.com/lucascouts/claude-agent-tui/commit/99be61736fd49a920fd1f6bf98633ec5e214e3a0))
+
+
+### Bug Fixes
+
+* linear-time local-command marker stripping (CodeQL js/polynomial-redos) (mirror fork story 052) ([b75e9c9](https://github.com/lucascouts/claude-agent-tui/commit/b75e9c98bc8ec320e27340ade397e6c9e1936277))
+
 ## [0.3.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.3.0...v0.3.1) (2026-06-19)
 
 
