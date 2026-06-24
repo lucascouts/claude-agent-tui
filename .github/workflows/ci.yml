@@ -80,3 +80,19 @@ jobs:
         with:
           scan-args: |-
             --lockfile=package-lock.json
+
+  trufflehog:
+    name: Secret scan (trufflehog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          # Full history: trufflehog diffs base..head; shallow depth=1 scans nothing.
+          fetch-depth: 0
+
+      - name: Run trufflehog
+        uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51 # v3.95.5
+        with:
+          extra_args: --results=verified,unknown
