@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.3.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.1.0...v0.3.1) (2026-06-24)
+
+
+### Features
+
+* **049:** claude binary drift resilience — mirror sync ([c91b833](https://github.com/lucascouts/claude-agent-tui/commit/c91b8333d1cf3ed466a816d81af5befe4dfc5ff8))
+* **deps:** update dependency chain + clear advisories (mirror fork story 047) ([3014dee](https://github.com/lucascouts/claude-agent-tui/commit/3014dee5c9dfd903899eca187298284ea1a00d8e))
+* live Agent Panel selectors (model/effort/permission-mode) + model-switch hang fix ([8d6d77b](https://github.com/lucascouts/claude-agent-tui/commit/8d6d77b245f4230b8cd503ce83c13ee05ba93884))
+* migrate @agentclientprotocol/sdk to 0.25.0 (SessionModel → configOption "model") ([59d3677](https://github.com/lucascouts/claude-agent-tui/commit/59d3677b876edcc748f8bbb1b2469e6259ed6432))
+
+
+### Bug Fixes
+
+* **046:** defer discovery + guard for in-place re-spawn (live boot-bypass stall) ([1eedaf9](https://github.com/lucascouts/claude-agent-tui/commit/1eedaf9dff31e770615da08e29fc58b43fb53347))
+* **046:** permission mode drives the TUI + gate honors mode (Bug A) ([17ee8a4](https://github.com/lucascouts/claude-agent-tui/commit/17ee8a44662680ac140bb650f1a20f8fb729f6ce))
+* **deps:** treat BetaFallbackBlock as no-op (@anthropic-ai/sdk 0.104) ([a9c1d76](https://github.com/lucascouts/claude-agent-tui/commit/a9c1d767959c1da16e8b3050f02f7e4b6f781699))
+* linear-time local-command marker stripping (CodeQL js/polynomial-redos) (mirror fork story 052) ([945bf36](https://github.com/lucascouts/claude-agent-tui/commit/945bf36b0ac9e5451c6ad7804fd5484b6be49719))
+* **lint:** clear 10 eslint errors in src (no-undef, cause, default-case, const) ([617a2f5](https://github.com/lucascouts/claude-agent-tui/commit/617a2f5cfef722ba9e056b640f307bb00227883e))
+
+
+### Documentation
+
+* note June 15 pause of the SDK billing split (README + npm description) ([6e43819](https://github.com/lucascouts/claude-agent-tui/commit/6e43819a4a10f1879779287a8816915b88e12f21))
+
+
+### Miscellaneous Chores
+
+* release 0.2.1 ([3d61e4e](https://github.com/lucascouts/claude-agent-tui/commit/3d61e4ee6a3c810502d77b90aed225b66a45c912))
+* release 0.2.2 ([92cee4e](https://github.com/lucascouts/claude-agent-tui/commit/92cee4ee985419256ce2be04845aa5980925e0c0))
+
 ## [0.4.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.3.1...v0.4.0) (2026-06-23)
 
 
