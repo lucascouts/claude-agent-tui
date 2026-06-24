@@ -62,3 +62,21 @@ jobs:
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  osv-scan:
+    name: SCA (OSV-Scanner, warn-first)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: OSV-Scanner (lockfile SCA)
+        # Warn-first: continue-on-error keeps the pipeline green — enforcement is a
+        # later, explicit decision (story 051 R1.2/R7.2). Plain action step, NOT the
+        # reusable workflow (which forces SARIF upload + cannot be made non-blocking).
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        continue-on-error: true
+        with:
+          scan-args: |-
+            --lockfile=package-lock.json
