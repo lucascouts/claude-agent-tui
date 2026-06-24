@@ -3,3 +3,7 @@ dist
 .DS_Store
 .claude/*.local.*
 CLAUDE.local.md
+
+# Private source-of-truth / backup meta-docs — must NOT ship in the public mirror
+BACKUP.md
+relatorio-do-projeto.md

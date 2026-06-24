@@ -6,7 +6,7 @@ artifact and how to report a vulnerability.
 
 ## Reporting a Vulnerability
 
-Report privately to the maintainer (`otakugeekx@gmail.com`) or via GitHub
+Report privately to the maintainer (`lucascs@proton.me`) or via GitHub
 **Private vulnerability reporting** (Security tab → _Report a vulnerability_).
 Please do not open a public issue for a security report. Include affected
 version, reproduction, and impact. Expect an initial acknowledgement within a
