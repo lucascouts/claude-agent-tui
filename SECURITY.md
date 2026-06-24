@@ -7,7 +7,7 @@ artifact and how to report a vulnerability.
 ## Reporting a Vulnerability
 
 Report privately to the maintainer (`otakugeekx@gmail.com`) or via GitHub
-**Private vulnerability reporting** (Security tab → *Report a vulnerability*).
+**Private vulnerability reporting** (Security tab → _Report a vulnerability_).
 Please do not open a public issue for a security report. Include affected
 version, reproduction, and impact. Expect an initial acknowledgement within a
 few days.
@@ -15,22 +15,22 @@ few days.
 ## Supply-Chain & Security Controls
 
 Controls are **warn-first**: scanners run in CI but do **not** block the
-pipeline. Promoting any scanner to *blocking* is a later, explicit decision.
+pipeline. Promoting any scanner to _blocking_ is a later, explicit decision.
 
 ### Active (wired)
 
-| Area | Control | Detail |
-|---|---|---|
-| Secret scanning | **gitleaks** | pre-commit hook + CI job |
-| Secret scanning | **trufflehog** | CI job, `fetch-depth: 0` (diff base..head) |
-| SCA (known CVEs) | **OSV-Scanner** | warn-first CI job over `package-lock.json` |
-| SAST | **CodeQL default setup** | JS/TS + Python + Actions on `main` |
-| Provenance | **npm trusted publishing** (OIDC) + `--provenance` | no long-lived `NPM_TOKEN`; signed provenance attestation |
-| Release integrity | **Syft SBOM** (SPDX-JSON) of the release tarball | attached as a release asset |
-| Release integrity | **Cosign keyless signing** (Fulcio/Rekor, OIDC) of the tarball + SBOM | `.sig`/`.pem` attached as release assets |
-| Supply chain | every third-party Action **pinned by commit SHA** | all workflows |
-| Supply chain | **dependabot** with a **7-day cooldown** on both ecosystems | `dependabot.yml` |
-| Frozen installs | `npm ci` everywhere (committed lockfile) | — |
+| Area              | Control                                                               | Detail                                                   |
+| ----------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| Secret scanning   | **gitleaks**                                                          | pre-commit hook + CI job                                 |
+| Secret scanning   | **trufflehog**                                                        | CI job, `fetch-depth: 0` (diff base..head)               |
+| SCA (known CVEs)  | **OSV-Scanner**                                                       | warn-first CI job over `package-lock.json`               |
+| SAST              | **CodeQL default setup**                                              | JS/TS + Python + Actions on `main`                       |
+| Provenance        | **npm trusted publishing** (OIDC) + `--provenance`                    | no long-lived `NPM_TOKEN`; signed provenance attestation |
+| Release integrity | **Syft SBOM** (SPDX-JSON) of the release tarball                      | attached as a release asset                              |
+| Release integrity | **Cosign keyless signing** (Fulcio/Rekor, OIDC) of the tarball + SBOM | `.sig`/`.pem` attached as release assets                 |
+| Supply chain      | every third-party Action **pinned by commit SHA**                     | all workflows                                            |
+| Supply chain      | **dependabot** with a **7-day cooldown** on both ecosystems           | `dependabot.yml`                                         |
+| Frozen installs   | `npm ci` everywhere (committed lockfile)                              | —                                                        |
 
 ### Verifying a release
 
