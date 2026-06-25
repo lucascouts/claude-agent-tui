@@ -1,0 +1,59 @@
+name: Scorecard supply-chain security
+
+# OpenSSF Scorecard — closes the last supply-chain gap flagged in the project
+# report (§10/§11.3): SCA (OSV), secret scan (gitleaks/trufflehog), SBOM+Cosign
+# and dependabot cooldown were already wired by story 051; Scorecard posture was
+# the remainder. Public repo only (this mirror) — the private source-of-truth
+# fork cannot run it for free.
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly, Monday 04:27 UTC (offset to avoid the top-of-hour runner rush).
+    - cron: "27 4 * * 1"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: "scorecard-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      security-events: write # upload SARIF to the code-scanning dashboard
+      id-token: write # publish_results to the public OpenSSF dashboard (OIDC)
+
+    steps:
+      - name: Checkout
+        # Pinned by SHA — same pin as ci.yml / publish.yml.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard analysis
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # publish_results posts the score to the public OpenSSF dashboard (enables
+          # the README badge). Set to false to keep results private to this repo.
+          publish_results: true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SARIF file
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload SARIF to code-scanning
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          sarif_file: results.sarif

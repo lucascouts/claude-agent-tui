@@ -1,0 +1,51 @@
+name: CodeQL
+
+# Advanced CodeQL config — versioned in-repo and pinned by SHA (auditable), vs the
+# server-side "default setup" cited in SECURITY.md.
+#
+# PREREQUISITE before pushing: GitHub rejects advanced-config runs while CodeQL
+# "default setup" is still enabled. Switch it off first:
+#   Settings -> Code security -> CodeQL analysis -> Set up -> Advanced
+# Otherwise runs fail with: "CodeQL analyses ... cannot be processed when the
+# default setup is enabled."
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "27 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "codeql-${{ github.ref }}"
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        with:
+          category: "/language:javascript-typescript"
