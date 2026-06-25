@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.5.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.4.0...v0.5.0) (2026-06-25)
+
+
+### Features
+
+* **049:** claude binary drift resilience — mirror sync ([c91b833](https://github.com/lucascouts/claude-agent-tui/commit/c91b8333d1cf3ed466a816d81af5befe4dfc5ff8))
+* **054:** subagent permission relay (mirror) + PERMISSIONS.md ([9c8b308](https://github.com/lucascouts/claude-agent-tui/commit/9c8b30855974e200e3575d8ac0ebd8c58d993eef))
+
 ## [0.4.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.3.1...v0.4.0) (2026-06-23)
 
 
