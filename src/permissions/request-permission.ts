@@ -139,6 +139,11 @@ export interface RequestPermissionOptions {
   correlator: ToolUseCorrelator;
   /** Optional sink for the fail-closed diagnostics (defaults to no-op; production wires the logger). */
   onWarn?: (message: string) => void;
+  /** Story 054 — when set, the ACP prompt attaches to this PARENT Task tool_call id (the id Zed already
+   *  rendered) instead of the inner tool_use id; the correlator STILL decides on the inner id. */
+  dialogToolCallId?: string;
+  /** Story 054 — the subagent's label, named in the prompt title alongside the inner tool. */
+  subagentLabel?: string;
 }
 
 /**
@@ -150,7 +155,7 @@ export interface RequestPermissionOptions {
  *   `'deny'` otherwise.
  */
 export async function requestPermission(opts: RequestPermissionOptions): Promise<"allow" | "deny"> {
-  const { client, sessionId, toolCall, correlator, onWarn } = opts;
+  const { client, sessionId, toolCall, correlator, onWarn, dialogToolCallId, subagentLabel } = opts;
 
   // 1) Correlate by tool_use.id BEFORE asking — an uncorrelated/duplicate call is denied, not prompted.
   const correlation = correlator.decide(toolCall.toolUseId);
@@ -169,8 +174,14 @@ export async function requestPermission(opts: RequestPermissionOptions): Promise
     result = await client.requestPermission({
       sessionId,
       toolCall: {
-        toolCallId: toolCall.toolUseId,
-        title: toolCall.toolName,
+        // Story 054: a subagent inner tool relays under the PARENT Task id Zed already rendered
+        // (dialogToolCallId), naming the inner tool + subagent in the title. A main-chain call (no
+        // dialogToolCallId) is byte-identical to today: toolCallId = inner id, title = bare tool name.
+        toolCallId: dialogToolCallId ?? toolCall.toolUseId,
+        title:
+          dialogToolCallId !== undefined
+            ? `${toolCall.toolName} · from the ${subagentLabel ?? "subagent"} agent`
+            : toolCall.toolName,
         rawInput: toolCall.toolInput,
       },
       options: buildPermissionOptions(),

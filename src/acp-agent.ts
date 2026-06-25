@@ -98,6 +98,11 @@ import {
   spawnIdsOpen,
 } from "./subagent-source.js";
 import type { ListSubagents, GetSubagentMessages } from "./subagent-source.js";
+import {
+  collectSidechainToolUses,
+  registerSidechainGateToolUses,
+  type SidechainToolUse,
+} from "./subagent-gate.js";
 import { createSubagentWatcher } from "./subagent-watcher.js";
 import type { SubagentWatcher } from "./subagent-watcher.js";
 import { classifyDiffSource, diffToolCallUpdate } from "./diff-source.js";
@@ -165,6 +170,12 @@ type Session = {
    * was surfaced in an earlier pump). Per-session — sub-agent row uuids are session-scoped.
    */
   emittedNested: Set<string>;
+  /** Story 054 — per-session dedup Set of sidechain inner tool_use ids already fed to the gate
+   *  correlator (R3 exactly-once). Lazy-init on the gated pump path; absent on a no-gate session. */
+  registeredSidechain?: Set<string>;
+  /** Story 054 — maps a sidechain inner tool_use id → its SidechainToolUse (parentId/toolName/
+   *  toolInput), for the decide()-time parent-Task dialog relay (Tasks 3/4). */
+  sidechainParentMap?: Map<string, SidechainToolUse>;
   /** The managed engine that owns the PTY + watcher; used for idempotent teardown (story 014). */
   engine?: SessionEngine;
   cancelled: boolean;
@@ -992,6 +1003,41 @@ function registerGateToolUses(raw: unknown, gate: SessionGate): void {
       gate.correlator.register((block as { id: string }).id);
     }
   }
+}
+
+/**
+ * Story 054 — best-effort label for the subagent that spawned a sidechain inner tool, for the ACP
+ * dialog title + the R4 visible-deny line. `parentId` is the spawning `Task`/`Agent` tool_use id; we
+ * scan the MAIN chain `messages` for the assistant `tool_use` block with `id === parentId` whose `name`
+ * is `Task`/`Agent`, and return its `input.subagent_type ?? input.description` when a string, else
+ * undefined. An orphan (`parentId === null`) has no spawn to name → undefined. Tolerant of the reduced
+ * shape in the {@link hasSubagentSpawn} style: non-object rows/messages and non-array content are skipped.
+ */
+function deriveSubagentLabel(
+  messages: SessionMessage[],
+  parentId: string | null,
+): string | undefined {
+  if (parentId === null) return undefined;
+  for (const msg of messages) {
+    if (msg === null || typeof msg !== "object") continue;
+    const inner = (msg as { message?: unknown }).message;
+    if (inner === null || typeof inner !== "object") continue;
+    const content = (inner as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block === null || typeof block !== "object") continue;
+      const b = block as { type?: unknown; id?: unknown; name?: unknown; input?: unknown };
+      if (b.type !== "tool_use" || b.id !== parentId) continue;
+      if (b.name !== "Task" && b.name !== "Agent") continue;
+      const input = b.input;
+      if (input === null || typeof input !== "object") return undefined;
+      const i = input as { subagent_type?: unknown; description?: unknown };
+      if (typeof i.subagent_type === "string") return i.subagent_type;
+      if (typeof i.description === "string") return i.description;
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export class ClaudeAcpAgent implements Agent {
@@ -2215,6 +2261,26 @@ export class ClaudeAcpAgent implements Agent {
     // `detectorCursor` nor register as gate tool_uses).
     await this.emitLinearizedWithNested(sessionId, session, messages);
 
+    // === SEAM(054) — feed the gate correlator from the sidechain rows (R3). Gated + LIVE-ONLY: runs
+    // only with a present, non-torndown gate, and NEVER inside the shared emitLinearizedWithNested that
+    // session/load replay also calls — so replay stays pure (U3). Additive: touches only the correlator +
+    // the per-session dedup Set/parentMap, never emittedNested nor the detector cursor (U2/U5).
+    if (session.gate && !session.gate.isTorndown) {
+      const subagentRows = await sourceSubagentRows(sessionId, messages, {
+        dir: session.cwd,
+        listSubagents: this.listSubagents,
+        getSubagentMessages: this.getSubagentMessages,
+      });
+      session.registeredSidechain ??= new Set<string>();
+      session.sidechainParentMap ??= new Map<string, SidechainToolUse>();
+      registerSidechainGateToolUses(
+        collectSidechainToolUses(subagentRows),
+        session.gate.correlator,
+        session.registeredSidechain,
+        session.sidechainParentMap,
+      );
+    }
+
     // === SEAM(044) — Option-B sub-agent watcher: arm/refresh/teardown rides the MAIN-CHAIN spawn
     // signal (`hasSubagentSpawn` + `spawnIdsOpen` over the FULL pumped messages — design key
     // decision 4: NOT the detector's `openTaskIds`, the very inference that failed live in the
@@ -2606,7 +2672,23 @@ export class ClaudeAcpAgent implements Agent {
     // (idempotent with teardownSession) so a crashed TUI leaks no port/server/scratch.
     if (gate) {
       const boundGate = gate;
-      boundGate.bindSession(startedSessionId, () => void this.pumpUpdates(startedSessionId));
+      // Story 054 — the third arg is a LAZY subagent relay resolver: at decide()-time it reads the
+      // session's sidechainParentMap (populated by the pump) to map an inner tool_use id to its parent
+      // Task id + a derived label, so the gate relays a subagent tool's dialog under the parent Task
+      // (R1/R2) or fails loud (R4). A main-chain id (no map entry) returns undefined → unchanged (U1).
+      boundGate.bindSession(
+        startedSessionId,
+        () => void this.pumpUpdates(startedSessionId),
+        (innerId) => {
+          const s = this.sessions[startedSessionId];
+          const entry = s?.sidechainParentMap?.get(innerId);
+          if (!entry) return undefined;
+          return {
+            parentId: entry.parentId,
+            subagentLabel: deriveSubagentLabel(s?.lastMessages ?? [], entry.parentId) ?? "subagent",
+          };
+        },
+      );
       boundGate.bindPty(started.pty as unknown as GatePty);
       started.pty.onExit(() => void boundGate.teardown());
     }
