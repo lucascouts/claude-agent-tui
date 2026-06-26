@@ -31,10 +31,10 @@ const SHORT_KNOBS = {
   closeTimeoutMs: 1000,
 };
 
-function post(port: number, body: string): Promise<{ status: number; json: any }> {
+function post(port: number, body: string, token?: string): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path: FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
+      { host: "127.0.0.1", port, path: token ? `${FORK_HOOK_MARKER_PATH}/${token}` : FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
       (res) => {
         let data = "";
         res.setEncoding("utf8");
@@ -128,7 +128,7 @@ test("4.1 a subagent inner tool RAISES a dialog carrying the PARENT Task id (the
     toolInput: { command: "ls" },
   });
 
-  const { json } = await post(gate.port, payload("toolu_inner_bash"));
+  const { json } = await post(gate.port, payload("toolu_inner_bash"), gate.token);
 
   assert.equal(calls.length, 1, "a subagent tool now raises EXACTLY one Zed dialog (before the fix: zero)");
   assert.equal(
@@ -140,7 +140,10 @@ test("4.1 a subagent inner tool RAISES a dialog carrying the PARENT Task id (the
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "the user's allow is enforced on the inner tool");
 });
 
-test("4.1 an ORPHAN subagent (parentId null) does NOT raise against a bogus id — it falls through to deny", async (t) => {
+test("4.1 (055-inverted) an ORPHAN subagent (parentId null) relays a LABELLED dialog under the INNER id — never a deny", async (t) => {
+  // STORY 055 (R2.3) INVERTS the story-054 behavior: an orphan subagent tool USED to be a silent deny
+  // (no dialog). It is now a bare, LABELLED relay — the dialog is raised under the INNER tool_use id
+  // (no parent to attach to) and the user's decision is enforced. Still gated, still prompted.
   const { calls, gate, session } = await setup(t, () => ALLOW_OPTION_ID);
   // The pump saw the inner id but its parent was never a real Task (parentId null = orphan).
   seedSidechain(session, {
@@ -150,17 +153,26 @@ test("4.1 an ORPHAN subagent (parentId null) does NOT raise against a bogus id �
     toolInput: { command: "whoami" },
   });
 
-  const { json } = await post(gate.port, payload("toolu_orphan_inner"));
+  const { json } = await post(gate.port, payload("toolu_orphan_inner"), gate.token);
 
-  assert.equal(json.hookSpecificOutput.permissionDecision, "deny", "an orphan subagent tool is denied, never approved");
-  assert.equal(calls.length, 0, "no dialog is raised against a non-existent parent id (R4 visible deny instead)");
+  assert.equal(calls.length, 1, "an orphan subagent tool now PROMPTS (055 inverts the 054 silent deny)");
+  assert.equal(
+    calls[0].toolCall.toolCallId,
+    "toolu_orphan_inner",
+    "with no parent, the labelled dialog keys on the INNER tool_use id",
+  );
+  assert.equal(
+    json.hookSpecificOutput.permissionDecision,
+    "allow",
+    "the user's allow on the orphan prompt is enforced — never a silent deny",
+  );
 });
 
 test("4.1 a MAIN-CHAIN tool still raises under its OWN id (no sidechain entry) — parity unchanged (U1)", async (t) => {
   const { calls, gate } = await setup(t, () => DENY_OPTION_ID);
   gate.correlator.register("toolu_main"); // main-chain feed, no sidechainParentMap entry
 
-  const { json } = await post(gate.port, payload("toolu_main", "Write", { file_path: "/p", content: "x" }));
+  const { json } = await post(gate.port, payload("toolu_main", "Write", { file_path: "/p", content: "x" }), gate.token);
 
   assert.equal(calls.length, 1, "a main-chain tool still prompts");
   assert.equal(calls[0].toolCall.toolCallId, "toolu_main", "main-chain dialog keys on its own id (no parent re-target)");

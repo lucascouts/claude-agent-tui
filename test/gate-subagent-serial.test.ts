@@ -29,10 +29,10 @@ const KNOBS = {
   closeTimeoutMs: 1000,
 };
 
-function post(port: number, body: string): Promise<{ status: number; json: any }> {
+function post(port: number, body: string, token?: string): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path: FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
+      { host: "127.0.0.1", port, path: token ? `${FORK_HOOK_MARKER_PATH}/${token}` : FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
       (res) => {
         let data = "";
         res.setEncoding("utf8");
@@ -114,8 +114,8 @@ test("5.1 two parallel subagent permissions resolve independently with serialize
 
   // Fire BOTH hooks concurrently.
   const [resA, resB] = await Promise.all([
-    post(gate.port, payload("toolu_inner_A")),
-    post(gate.port, payload("toolu_inner_B")),
+    post(gate.port, payload("toolu_inner_A"), gate.token),
+    post(gate.port, payload("toolu_inner_B"), gate.token),
   ]);
 
   assert.equal(maxConcurrent, 1, "the request/sweep critical section is SERIALIZED — never two prompts in-flight at once (R5)");

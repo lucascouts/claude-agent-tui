@@ -31,7 +31,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { findFreePort } from "../gate/port.js";
 import { injectHook, restore, type Backup } from "../gate/settings-writer.js";
 import { startHookServer, type ForwardedToolCall, type HookServer } from "./hook-server.js";
@@ -98,6 +98,14 @@ export const DEFAULT_CORRELATION_POLL_MS = 50;
  *  fail-closed timeout deny. Tracked separately from the poll interval (the poll is 10-50ms; nudging on
  *  every poll would hammer the pump) — a nudge fires only once ~250ms has elapsed since the last one. */
 export const DEFAULT_CORRELATION_RENUDGE_MS = 250;
+
+/**
+ * FIX(watchdog-permission): while a permission dialog is pending the claude is BLOCKED and writes
+ * nothing to the JSONL, so the end-of-turn watchdog (120s of silence) would mistake a long human
+ * decision for a dead turn. Re-arm it every this-many ms via the bound `noteActivity` for as long as
+ * the dialog is open. Must stay well under TURN_STALL_WATCHDOG_MS (120_000).
+ */
+export const DEFAULT_PERMISSION_HEARTBEAT_MS = 30_000;
 /** Default window for the native prompt to APPEAR after an allow decision (#52822 sweep, ms).
  *  If no marker renders within it, allow-suppression held (the 2.1.161 case) — nothing to clear. */
 export const DEFAULT_PROMPT_APPEAR_MS = 1500;
@@ -172,6 +180,9 @@ export type ResolveSubagentRelay = (innerToolUseId: string) => SubagentRelay | u
 export interface SessionGate {
   /** The verified-free loopback port the hook server bound (== the port in the scratch hook URL). */
   port: number;
+  /** Story 055 (R1.3) — the per-session secret token bound into the hook URL after the marker path.
+   *  The hook-server rejects any PreToolUse POST that does not present `${marker}/<token>`. */
+  readonly token: string;
   /** Absolute path of the per-session scratch settings file (hand to the spawn as `--settings`). */
   settingsPath: string;
   /** The per-session `tool_use.id` correlation map. The live pump REGISTERS every JSONL `tool_use`
@@ -193,6 +204,8 @@ export interface SessionGate {
     sessionId: string,
     nudge?: () => void,
     resolveSubagentRelay?: ResolveSubagentRelay,
+    /** FIX(watchdog-permission) — re-arms the end-of-turn watchdog while a permission dialog is open. */
+    noteActivity?: () => void,
   ): void;
   /** Bind the live PTY: stores the raw writer for the allow keystroke and (when the PTY exposes
    *  `onData`) attaches the recent-output tap feeding the native-prompt probe. */
@@ -211,6 +224,8 @@ const defaultSchedule: Schedule = (fn, ms) => {
 /** Internal mutable state of one session's gate. */
 class SessionGateImpl implements SessionGate {
   port = 0;
+  /** Story 055 (R1.3) — set in {@link start} to a crypto-random per-session secret. */
+  token = "";
   settingsPath = "";
   readonly correlator = new ToolUseCorrelator();
 
@@ -220,6 +235,8 @@ class SessionGateImpl implements SessionGate {
   private nudge?: () => void;
   /** Story 054 — lazy resolver: inner tool_use id → its subagent relay (parent Task id + label). */
   private resolveSubagentRelay?: ResolveSubagentRelay;
+  /** FIX(watchdog-permission) — re-arms the end-of-turn watchdog while a permission dialog is open. */
+  private noteActivity?: () => void;
   private pty?: PtyWriter;
   private outputTap?: { dispose(): void };
   /** Rolling tail of recent PTY output + absolute count of chars ever appended (probe offsets). */
@@ -258,6 +275,31 @@ class SessionGateImpl implements SessionGate {
     return run;
   }
 
+  /**
+   * FIX(watchdog-permission): start a heartbeat that re-arms the end-of-turn watchdog (via the bound
+   * `noteActivity`) every {@link DEFAULT_PERMISSION_HEARTBEAT_MS} while a permission dialog is open, so
+   * the human decision time is never counted as transcript silence. Self-reschedules through the
+   * injectable `schedule` (testable). Returns a stop fn; safe/no-op when `noteActivity` is unset.
+   */
+  private startPermissionHeartbeat(): () => void {
+    const note = this.noteActivity;
+    if (!note) return () => {};
+    let stopped = false;
+    const tick = (): void => {
+      if (stopped || this.torndown) return;
+      try {
+        note();
+      } catch {
+        // heartbeat is best-effort liveness; a failure never affects the decision
+      }
+      this.schedule(tick, DEFAULT_PERMISSION_HEARTBEAT_MS);
+    };
+    this.schedule(tick, DEFAULT_PERMISSION_HEARTBEAT_MS);
+    return () => {
+      stopped = true;
+    };
+  }
+
   /** Start the hook server, then write the scratch settings (server first, so the URL the settings
    *  point at is live before claude can ever read them; settings BEFORE the spawn is the caller's
    *  ordering contract — blocker c). */
@@ -265,8 +307,14 @@ class SessionGateImpl implements SessionGate {
     const findPort = this.opts.findPort ?? findFreePort;
     this.port = await findPort();
 
+    // Story 055 (R1.3): a per-session crypto-random secret bound into the hook URL (after the marker
+    // path). The hook-server rejects any PreToolUse POST that does not present it — the compensating
+    // control for the relaxed JSONL anti-forgery (decide() now seeds the correlator from the payload).
+    this.token = randomBytes(24).toString("hex");
+
     this.server = await startHookServer({
       port: this.port,
+      token: this.token,
       deciderTimeoutMs: this.opts.deciderTimeoutMs,
       onWarn: (m) => this.warn(m),
       onToolCall: (call) => this.decide(call),
@@ -278,6 +326,7 @@ class SessionGateImpl implements SessionGate {
       this.backup = await injectHook({
         settingsPath: this.settingsPath,
         port: this.port,
+        token: this.token,
         timeout: this.opts.hookTimeoutSeconds,
       });
     } catch (err) {
@@ -292,10 +341,12 @@ class SessionGateImpl implements SessionGate {
     sessionId: string,
     nudge?: () => void,
     resolveSubagentRelay?: ResolveSubagentRelay,
+    noteActivity?: () => void,
   ): void {
     this.sessionId = sessionId;
     this.nudge = nudge;
     this.resolveSubagentRelay = resolveSubagentRelay;
+    this.noteActivity = noteActivity;
   }
 
   bindPty(pty: GatePty): void {
@@ -348,36 +399,47 @@ class SessionGateImpl implements SessionGate {
       return "deny";
     }
 
+    // FIX(gate-deadlock): the claude flushes the `tool_use` JSONL line only AFTER the hook decision,
+    // so correlating against the JSONL deadlocks — the line never reaches the pump during the wait
+    // (proven live 2026-06-25: total=9 frozen for 5s, the id only registered post-deny). Seed the
+    // correlator from the hook payload, the AUTHORITATIVE tool_use.id source, so the gate decides on
+    // the payload (the JSONL stays best-effort enrichment). Mirrors the ACP original's permission
+    // callback, which decided directly on the SDK-supplied tool id without a transcript round-trip.
+    this.correlator.ensureRegistered(call.toolUseId);
+
     await this.waitForCorrelation(call.toolUseId);
 
-    // === Story 054 (§9 subagent relay) — AFTER the correlation wait, BEFORE the ACP prompt. ========
-    // The hook payload carries NO parent id (ForwardedToolCall has no parent_tool_use_id); the ONLY
-    // source of a subagent inner tool's parent is the session's sidechainParentMap, read lazily via
-    // the bound resolver. An undefined relay = a MAIN-CHAIN tool → both fields stay undefined and the
-    // requestPermission call below is byte-identical to today (U1). A KNOWN subagent inner tool relays
-    // its dialog under the parent Task id Zed already rendered (R1/R2) — UNLESS it cannot be safely
-    // relayed (orphan parent, or it never became a clean JSONL match within the wait window), in which
-    // case we fail LOUD (R4): a VISIBLE deny through the gate's warn surface (→ this.logger.error),
-    // naming the subagent + inner tool, and return "deny" WITHOUT raising a dialog against a bogus id.
-    const relay = this.resolveSubagentRelay?.(call.toolUseId);
+    // === Story 054/055 (§9 subagent relay) — AFTER the correlation wait, BEFORE the ACP prompt. =====
+    // R2.2 — the dialog LABEL is sourced from the payload's `agent_type` (carried by parsePayload,
+    // story 055/2.1): transcript-independent and known NOW, so a subagent tool is always attributed
+    // even when its parent Task id is not (yet) resolvable. A main-chain payload has no agent_type →
+    // `subagentLabel` stays undefined and the requestPermission call below is byte-identical to today
+    // (U1: bare tool name, dialog under the inner id).
+    //
+    // R2.3 — parent-Task GROUPING is BEST-EFFORT. The hook payload carries NO parent id; the only
+    // source is the session's sidechainParentMap, read lazily via the bound resolver and populated by
+    // the (transcript-lagging) pump. WHEN it resolves a non-null parent, the dialog attaches under that
+    // parent Task id Zed already rendered. For a subagent whose row has NOT landed yet, give the pump a
+    // brief re-nudged window to register it mid-wait (the join is pump-fed, like the inner correlation);
+    // on expiry we relay the LABELLED dialog under the INNER id. An orphan (parentId === null) or an
+    // unresolved subagent is therefore PROMPTED (labelled), NEVER silently denied — this REPLACES the
+    // story-054 orphan/uncorrelated visible deny. The only deny here is requestPermission's own
+    // fail-closed (transport error / cancelled / duplicate id), propagated unchanged.
+    let subagentLabel: string | undefined = call.agentType;
+    let relay = this.resolveSubagentRelay?.(call.toolUseId);
+    if (!relay && call.agentType !== undefined) {
+      // A subagent tool (agent_type present) whose parent row may still be in flight: best-effort wait.
+      relay = await this.waitForSubagentParent(call.toolUseId);
+    }
     let dialogToolCallId: string | undefined;
-    let subagentLabel: string | undefined;
     if (relay) {
-      // isCleanMatch PROBES (does not consume); requestPermission's correlator.decide still consumes
-      // the inner id. The orphan branch short-circuits BEFORE the probe via `||`.
-      if (relay.parentId === null || !this.correlator.isCleanMatch(call.toolUseId)) {
-        this.warn(
-          `[gate §9 subagent] FAIL CLOSED: subagent (${relay.subagentLabel}) tool "${call.toolName}" ` +
-            `(tool_use ${call.toolUseId}) ${
-              relay.parentId === null
-                ? "is an orphan — no parent Task to attach the permission dialog to"
-                : "never correlated in the JSONL within the wait window"
-            } — denying (R4 visible deny).`,
-        );
-        return "deny";
+      // Prefer the payload label; fall back to the resolver's best-effort label (a pre-055 caller / a
+      // subagent payload that somehow omitted agent_type).
+      subagentLabel = call.agentType ?? relay.subagentLabel;
+      // Group ONLY under a real, resolvable parent; an orphan (null) falls through to the inner-id relay.
+      if (relay.parentId !== null) {
+        dialogToolCallId = relay.parentId;
       }
-      dialogToolCallId = relay.parentId;
-      subagentLabel = relay.subagentLabel;
     }
 
     // === Story 054 (R5) — SERIALIZE only the raise+inject critical section. ========================
@@ -387,25 +449,33 @@ class SessionGateImpl implements SessionGate {
     // requestPermission + armAllowSweep one at a time — no native-prompt keystroke crossing on the
     // shared PTY. A single sequential main-chain tool is a no-op through the queue (U1).
     return this.enqueuePermission(async () => {
-      const decision = await requestPermission({
-        client: this.opts.client,
-        sessionId,
-        toolCall: {
-          toolUseId: call.toolUseId,
-          toolName: call.toolName,
-          toolInput: call.toolInput,
-        },
-        correlator: this.correlator,
-        onWarn: (m) => this.warn(m),
-        dialogToolCallId,
-        subagentLabel,
-      });
+      // FIX(watchdog-permission): the claude is blocked on this response with the JSONL silent, so
+      // re-arm the end-of-turn watchdog for as long as the dialog is open (a slow human decision is
+      // NOT a dead turn). Always cleared in `finally`, on success or throw.
+      const stopHeartbeat = this.startPermissionHeartbeat();
+      try {
+        const decision = await requestPermission({
+          client: this.opts.client,
+          sessionId,
+          toolCall: {
+            toolUseId: call.toolUseId,
+            toolName: call.toolName,
+            toolInput: call.toolInput,
+          },
+          correlator: this.correlator,
+          onWarn: (m) => this.warn(m),
+          dialogToolCallId,
+          subagentLabel,
+        });
 
-      if (decision === "allow") {
-        // Return the allow body FIRST (claude is blocked on this response); sweep out of band.
-        this.armAllowSweep(call);
+        if (decision === "allow") {
+          // Return the allow body FIRST (claude is blocked on this response); sweep out of band.
+          this.armAllowSweep(call);
+        }
+        return decision;
+      } finally {
+        stopHeartbeat();
       }
-      return decision;
     });
   }
 
@@ -447,6 +517,57 @@ class SessionGateImpl implements SessionGate {
               `tool_use line never reached the pump; the decision will fail closed (deny).`,
           );
           resolve();
+          return;
+        }
+        this.schedule(poll, pollMs);
+      };
+      this.schedule(poll, pollMs);
+    });
+  }
+
+  /**
+   * Story 055 (R2.3) — BEST-EFFORT parent grouping for a subagent inner tool. The `agent_id → parent
+   * tool_use.id` join lives only in the (transcript-lagging) pump-fed `sidechainParentMap`, so the
+   * parent may not be registered at decide()-time. Poll the lazy resolver, re-nudging the pump on the
+   * same {@link DEFAULT_CORRELATION_RENUDGE_MS} cadence so a sidechain row landing MID-WAIT is caught,
+   * and resolve with the relay AS SOON AS it appears. On expiry resolve `undefined` — the caller then
+   * relays the LABELLED dialog under the inner id (never a deny). Bounded by the same correlation
+   * window since the join is pump-fed exactly like the inner correlation; a torn-down gate resolves
+   * `undefined` immediately. Only ever called for a subagent payload (agent_type present), so a
+   * main-chain tool never incurs this wait.
+   */
+  private waitForSubagentParent(innerToolUseId: string): Promise<SubagentRelay | undefined> {
+    const resolveNow = (): SubagentRelay | undefined => this.resolveSubagentRelay?.(innerToolUseId);
+    const immediate = resolveNow();
+    if (immediate) return Promise.resolve(immediate);
+    const waitMs = this.opts.correlationWaitMs ?? DEFAULT_CORRELATION_WAIT_MS;
+    const pollMs = this.opts.correlationPollMs ?? DEFAULT_CORRELATION_POLL_MS;
+    const renudgeMs = this.opts.correlationRenudgeMs ?? DEFAULT_CORRELATION_RENUDGE_MS;
+    return new Promise((resolve) => {
+      let elapsed = 0;
+      let sinceNudge = 0;
+      const poll = (): void => {
+        if (this.torndown) {
+          resolve(undefined);
+          return;
+        }
+        const r = resolveNow();
+        if (r) {
+          resolve(r);
+          return;
+        }
+        elapsed += pollMs;
+        sinceNudge += pollMs;
+        if (sinceNudge >= renudgeMs) {
+          sinceNudge = 0;
+          try {
+            this.nudge?.();
+          } catch {
+            // best-effort: a nudge failure only widens the grouping window; never rejects or decides
+          }
+        }
+        if (elapsed >= waitMs) {
+          resolve(undefined); // best-effort expiry — relay under the inner id (labelled), not a deny
           return;
         }
         this.schedule(poll, pollMs);

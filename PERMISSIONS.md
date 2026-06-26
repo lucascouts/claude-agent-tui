@@ -107,12 +107,40 @@ The mode shortcuts run **before** correlation: `bypassPermissions` auto-allows e
 is auto-allowed under those modes with no dialog, exactly as a main-chain tool — the
 panel's mode selector is honored.
 
+### Live status (claude 2.1.191) — RESOLVED by story 055 (2026-06-26)
+
+A controlled real-fork run (driver `experiments/sidechain-gate-probe.mjs` + the hook-server
+raw-logging seam `FORK_HOOK_LOG_RAW`) settled what the in-Zed 053/054 proofs left ambiguous:
+
+- claude **does** fire a `PreToolUse` POST for a subagent-internal tool (the payload carries
+  `agent_id`/`agent_type`); the hook-server **receives** it and the gate **relays** it to Zed.
+  The earlier "subagent tools make 0 POSTs / the trigger never fires" reading was a measurement
+  artifact — it counted hooks in the sidechain _transcripts_, but the POST goes to the loopback
+  hook-server, not the transcript. There is **no** silent deny (the 053 regression) and **no**
+  blanket execution — each subagent tool is gated.
+- RESOLVED (story 055): the **subagent label** is now sourced from the payload's `agent_type`
+  (carried through `parsePayload`, available at `decide()`-time, transcript-independent), so a
+  subagent tool's dialog renders `<tool> · from the <agent_type> agent` even before its parent is
+  known. Parent-Task **grouping** is **best-effort** (the design confirmed there is NO payload →
+  parent `tool_use.id` join): the dialog attaches under the parent Task id when the pump has
+  registered the sidechain row in `sidechainParentMap` — resolved synchronously or caught by the
+  re-nudged `waitForSubagentParent` window — otherwise the labelled dialog relays under the INNER
+  id. An orphan / unresolved-parent subagent is therefore **prompted (labelled), never the
+  story-054 silent/visible deny**. Two compensating correlation fixes ship alongside: the deadlock
+  is fixed by seeding the correlator from the authoritative hook payload (`ensureRegistered`), and
+  the relaxed JSONL anti-forgery is compensated by a per-session hook-URL token (`R1.3`). The
+  in-Zed re-proof of the labelled/grouped relay is DEFERRED (the offline driver re-proof stands in).
+
 ## Fail-closed posture
 
 - A hook arriving before the gate is bound, or racing teardown → `deny`.
-- An uncorrelated / duplicate / re-entrant `tool_use.id` → `deny`.
+- A POST that does not present the per-session hook-URL token (story 055 / R1.3) → `deny`
+  (without ever invoking the decider).
+- A **duplicate / re-entrant** `tool_use.id` → `deny`. (An id not yet flushed to the JSONL is no
+  longer an automatic deny — story 055 seeds it from the authoritative hook payload.)
 - An ACP transport error or a `cancelled` outcome → `deny`.
-- A subagent orphan / never-correlated id → **logged** `deny`.
+- A subagent orphan / unresolved-parent id → a **labelled relay under the inner id** (prompted,
+  story 055), never a silent deny.
 - A native prompt that does not clear after the keystroke → stuck-prompt warning + HOLD
   (never a silent approve).
 
@@ -121,7 +149,10 @@ panel's mode selector is honored.
 Unit + integration via `node:test` (`npm run test:fork` / `npm test`):
 `subagent-gate`, `pump-subagent-gate-feed`, `request-permission-subagent`,
 `gate-subagent-decide`, `gate-subagent-renudge`, `gate-subagent-fallback`,
-`gate-subagent-serial`, `allow-inject-subagent` — plus the main-chain
-`request-permission-correlation` / `gate-wiring` regression. The in-Zed live proof
-(subagent dialog under the parent Task, allow/deny driving the native prompt, two parallel
-subagent tools, reduced-shape preserving the inner id) is the deferred manual E2E.
+`gate-subagent-serial`, `allow-inject-subagent` — plus the story-055 additions
+(`settings-writer-token`, `hook-server-token`, `request-permission-label`,
+`gate-subagent-orphan-relay`) and the main-chain `request-permission-correlation` /
+`gate-wiring` regression. The in-Zed live proof (subagent dialog under the parent Task,
+allow/deny driving the native prompt, two parallel subagent tools, reduced-shape preserving the
+inner id) was re-investigated 2026-06-25 — see § Live status above (trigger + relay confirmed;
+label RESOLVED via the payload `agent_type`, grouping best-effort; in-Zed re-proof DEFERRED).

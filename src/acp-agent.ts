@@ -2688,6 +2688,9 @@ export class ClaudeAcpAgent implements Agent {
             subagentLabel: deriveSubagentLabel(s?.lastMessages ?? [], entry.parentId) ?? "subagent",
           };
         },
+        // FIX(watchdog-permission): re-arm the end-of-turn watchdog while a permission dialog is open,
+        // so a slow human decision (JSONL silent meanwhile) is not mistaken for a dead turn.
+        () => this.sessions[startedSessionId]?.turnDetector?.noteActivity(),
       );
       boundGate.bindPty(started.pty as unknown as GatePty);
       started.pty.onExit(() => void boundGate.teardown());

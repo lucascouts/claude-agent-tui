@@ -108,6 +108,18 @@ export class ToolUseCorrelator {
     return count === 0;
   }
 
+  /**
+   * FIX(gate-deadlock): seed the correlator from the AUTHORITATIVE PreToolUse hook payload when the
+   * JSONL has not observed the id yet. The claude buffers the `tool_use` line and only flushes it to
+   * the transcript AFTER the hook decision, so waiting on the JSONL deadlocks (the line never arrives
+   * during the wait). Idempotent and safe: marks count=1 ONLY when unseen (0) — it never pushes an
+   * already-clean (1) id to duplicate (2), nor touches a genuine duplicate (>1). The pump's later
+   * observation of the same id (post-decision) is harmless: the id is already consumed by then.
+   */
+  ensureRegistered(toolUseId: string): void {
+    if ((this.seen.get(toolUseId) ?? 0) === 0) this.seen.set(toolUseId, 1);
+  }
+
   /** True iff `toolUseId` was observed EXACTLY once in the JSONL and has not yet been consumed. */
   isCleanMatch(toolUseId: string): boolean {
     return this.seen.get(toolUseId) === 1 && !this.consumed.has(toolUseId);
@@ -174,13 +186,16 @@ export async function requestPermission(opts: RequestPermissionOptions): Promise
     result = await client.requestPermission({
       sessionId,
       toolCall: {
-        // Story 054: a subagent inner tool relays under the PARENT Task id Zed already rendered
-        // (dialogToolCallId), naming the inner tool + subagent in the title. A main-chain call (no
-        // dialogToolCallId) is byte-identical to today: toolCallId = inner id, title = bare tool name.
+        // Story 054/055: a subagent inner tool relays under the PARENT Task id Zed already rendered
+        // (dialogToolCallId) WHEN the parent is resolvable; otherwise it keeps the inner id. Story 055
+        // (R2.2) DECOUPLES the attributed title from dialogToolCallId: the title is labelled whenever
+        // `subagentLabel` is set (sourced from the payload's agent_type), so a fast subagent whose
+        // parent has not yet been resolved still renders `<tool> · from the <agent_type> agent` under
+        // the inner id. A main-chain call (no subagentLabel) stays byte-identical: bare tool name.
         toolCallId: dialogToolCallId ?? toolCall.toolUseId,
         title:
-          dialogToolCallId !== undefined
-            ? `${toolCall.toolName} · from the ${subagentLabel ?? "subagent"} agent`
+          subagentLabel !== undefined
+            ? `${toolCall.toolName} · from the ${subagentLabel} agent`
             : toolCall.toolName,
         rawInput: toolCall.toolInput,
       },

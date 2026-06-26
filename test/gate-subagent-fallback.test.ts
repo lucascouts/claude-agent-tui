@@ -32,10 +32,10 @@ const SHORT_KNOBS = {
   closeTimeoutMs: 1000,
 };
 
-function post(port: number, body: string): Promise<{ status: number; json: any }> {
+function post(port: number, body: string, token?: string): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path: FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
+      { host: "127.0.0.1", port, path: token ? `${FORK_HOOK_MARKER_PATH}/${token}` : FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
       (res) => {
         let data = "";
         res.setEncoding("utf8");
@@ -100,10 +100,13 @@ async function setup(t: any, decide: () => string) {
   return { calls, errors, session, gate: session.gate! };
 }
 
-test("4.3 an ORPHAN subagent tool yields a LOGGED visible deny NAMING the subagent + inner tool (R4)", async (t) => {
-  const { calls, errors, session, gate } = await setup(t, () => ALLOW_OPTION_ID);
-  // The pump saw the inner id but its parent was never a real Task (parentId null = orphan). The gate
-  // KNOWS it is a subagent (parentMap entry) → the visible deny must name the subagent + inner tool.
+test("4.3 (055-inverted) an ORPHAN subagent tool relays a LABELLED dialog under the INNER id — never a deny", async (t) => {
+  // STORY 055 (R2.3) INVERTS the story-054 fail-loud deny: an orphan subagent tool is no longer a
+  // silent/visible deny. It is PROMPTED — a bare relay under the INNER id, labelled (the dialog still
+  // names the tool), and the user's decision is enforced. The R4 "visible deny" surface is gone for
+  // this path; the only deny left is requestPermission's own fail-closed (transport/cancel/duplicate).
+  const { calls, session, gate } = await setup(t, () => ALLOW_OPTION_ID);
+  // The pump saw the inner id but its parent was never a real Task (parentId null = orphan).
   gate.correlator.register("toolu_orphan_inner");
   session.sidechainParentMap = new Map([
     [
@@ -112,25 +115,25 @@ test("4.3 an ORPHAN subagent tool yields a LOGGED visible deny NAMING the subage
     ],
   ]);
 
-  const { json } = await post(gate.port, payload("toolu_orphan_inner"));
+  const { json } = await post(gate.port, payload("toolu_orphan_inner"), gate.token);
 
-  assert.equal(json.hookSpecificOutput.permissionDecision, "deny", "an orphan subagent tool is denied, never approved");
-  assert.equal(calls.length, 0, "no dialog is raised against a non-existent parent id");
-  const joined = errors.join("\n");
-  assert.ok(
-    /subagent/i.test(joined),
-    "the visible deny names it as a SUBAGENT (R4 — not a generic main-chain 'never reached the pump' warning)",
+  assert.equal(calls.length, 1, "an orphan subagent tool now PROMPTS (055 inverts the 054 visible deny)");
+  assert.equal(
+    calls[0].toolCall.toolCallId,
+    "toolu_orphan_inner",
+    "with no parent, the labelled dialog keys on the INNER tool_use id",
   );
-  assert.ok(
-    joined.includes("toolu_orphan_inner") || /Bash/.test(joined),
-    "the visible deny names the inner tool (id or name) so the user/log can see WHAT was denied (R4)",
+  assert.equal(
+    json.hookSpecificOutput.permissionDecision,
+    "allow",
+    "the user's allow on the orphan prompt is enforced — never a silent deny",
   );
 });
 
 test("4.3 a MAIN-CHAIN tool still correlates and raises unchanged (U1 parity)", async (t) => {
   const { calls, gate } = await setup(t, () => ALLOW_OPTION_ID);
   gate.correlator.register("toolu_main_ok");
-  const { json } = await post(gate.port, payload("toolu_main_ok", "Write", { file_path: "/p", content: "x" }));
+  const { json } = await post(gate.port, payload("toolu_main_ok", "Write", { file_path: "/p", content: "x" }), gate.token);
 
   assert.equal(calls.length, 1, "the main-chain tool still raises its dialog");
   assert.equal(calls[0].toolCall.toolCallId, "toolu_main_ok", "main-chain semantics unchanged");
@@ -145,7 +148,7 @@ test("4.3 bypassPermissions AUTO-ALLOWS a subagent tool WITHOUT a dialog (U4)", 
     ["toolu_sub_bypass", { id: "toolu_sub_bypass", parentId: "toolu_task_1", toolName: "Bash", toolInput: {} }],
   ]);
 
-  const { json } = await post(gate.port, payload("toolu_sub_bypass", "Bash", { command: "rm -rf /" }, "bypassPermissions"));
+  const { json } = await post(gate.port, payload("toolu_sub_bypass", "Bash", { command: "rm -rf /" }, "bypassPermissions"), gate.token);
 
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "bypassPermissions auto-allows the subagent tool");
   assert.equal(calls.length, 0, "no dialog is raised under bypass (selector honored, parity with main-chain U4)");
@@ -158,7 +161,7 @@ test("4.3 acceptEdits AUTO-ALLOWS an edit-class subagent tool WITHOUT a dialog (
     ["toolu_sub_edit", { id: "toolu_sub_edit", parentId: "toolu_task_1", toolName: "Write", toolInput: { file_path: "/x", content: "y" } }],
   ]);
 
-  const { json } = await post(gate.port, payload("toolu_sub_edit", "Write", { file_path: "/x", content: "y" }, "acceptEdits"));
+  const { json } = await post(gate.port, payload("toolu_sub_edit", "Write", { file_path: "/x", content: "y" }, "acceptEdits"), gate.token);
 
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "acceptEdits auto-allows the edit-class subagent tool");
   assert.equal(calls.length, 0, "no dialog under acceptEdits for an edit-class subagent tool (U4)");

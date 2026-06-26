@@ -54,20 +54,36 @@ export interface PreToolUseGroup {
   [FORK_HOOK_MARKER_KEY]?: true;
 }
 
+/** Story 055 (R1.3) — options for {@link buildHookEntry}: a per-session token plus the hook timeout. */
+export interface BuildHookOptions {
+  /**
+   * Per-session crypto-random secret appended to the hook URL AFTER {@link FORK_HOOK_MARKER_PATH}
+   * (e.g. `…/__fork-acp-gate__/<token>`). The hook-server rejects any PreToolUse POST that does not
+   * present it — the compensating control for the relaxed JSONL anti-forgery (decide() now seeds the
+   * correlator from the hook payload). Appending AFTER the marker keeps {@link isForkHookGroup} /
+   * {@link restore} matching on the marker substring, so teardown still recognizes the tokenized URL.
+   */
+  token?: string;
+  /** Hook timeout in SECONDS (default {@link DEFAULT_HOOK_TIMEOUT_SECONDS}). */
+  timeout?: number;
+}
+
 /**
  * Build the fork's `PreToolUse` `type:http` hook group, pointing at the 127.0.0.1 TCP-loopback
  * endpoint for the dynamically allocated free port (R1 / R2.3). The URL carries the fork-owned
- * sentinel path ({@link FORK_HOOK_MARKER_PATH}) so teardown can surgically remove ONLY this group.
+ * sentinel path ({@link FORK_HOOK_MARKER_PATH}) so teardown can surgically remove ONLY this group;
+ * when a {@link BuildHookOptions.token} is given (story 055 / R1.3) it is appended AFTER that marker.
  *
  * @param port the verified-free port from {@link import("./port.js").findFreePort} — a positive integer.
- * @param timeout hook timeout in SECONDS (default {@link DEFAULT_HOOK_TIMEOUT_SECONDS}).
+ * @param optsOrTimeout either a {@link BuildHookOptions} (token + timeout) OR, for backward
+ *   compatibility, the hook timeout in SECONDS as a bare number (default {@link DEFAULT_HOOK_TIMEOUT_SECONDS}).
  * @returns the `{ matcher, hooks:[{type:"http",…}], __forkAcpGate:true }` group.
  * @throws {Error} if `port` is not a positive integer (a bad port would produce a malformed/ungated
  *   hook — fail loud rather than silently emit a hook claude ignores).
  */
 export function buildHookEntry(
   port: number,
-  timeout: number = DEFAULT_HOOK_TIMEOUT_SECONDS,
+  optsOrTimeout: number | BuildHookOptions = DEFAULT_HOOK_TIMEOUT_SECONDS,
 ): PreToolUseGroup {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error(
@@ -75,12 +91,17 @@ export function buildHookEntry(
         `to build a malformed hook (claude would ignore it and the tool would run ungated).`,
     );
   }
+  const opts: BuildHookOptions =
+    typeof optsOrTimeout === "number" ? { timeout: optsOrTimeout } : optsOrTimeout;
+  const timeout = opts.timeout ?? DEFAULT_HOOK_TIMEOUT_SECONDS;
+  // R1.3: the token rides AFTER the marker path so isForkHookGroup/restore still match the marker.
+  const tokenSuffix = opts.token ? `/${opts.token}` : "";
   return {
     matcher: FORK_HOOK_MATCHER,
     hooks: [
       {
         type: "http",
-        url: `http://127.0.0.1:${port}${FORK_HOOK_MARKER_PATH}`,
+        url: `http://127.0.0.1:${port}${FORK_HOOK_MARKER_PATH}${tokenSuffix}`,
         timeout,
       },
     ],
@@ -299,15 +320,17 @@ export async function injectHook(opts: {
   settingsPath: string;
   port: number;
   timeout?: number;
+  /** Story 055 (R1.3) — per-session token bound into the hook URL after {@link FORK_HOOK_MARKER_PATH}. */
+  token?: string;
 }): Promise<Backup> {
-  const { settingsPath, port, timeout } = opts;
+  const { settingsPath, port, timeout, token } = opts;
 
   // 1) Snapshot the prior state (bytes or absence) — captured BEFORE any mutation (R4.1).
   const priorBytes = await readPriorBytes(settingsPath);
   const backup: Backup = { settingsPath, existed: priorBytes !== null, priorBytes };
 
-  // 2) Compute the merged object from the prior (parsed tolerantly) + the fork hook.
-  const group = buildHookEntry(port, timeout);
+  // 2) Compute the merged object from the prior (parsed tolerantly) + the fork hook (R1.3: tokenized).
+  const group = buildHookEntry(port, { token, timeout });
   let prior: SettingsLike | null = null;
   if (priorBytes !== null) {
     const text = priorBytes.toString("utf8").trim();

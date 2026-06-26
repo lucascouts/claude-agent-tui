@@ -51,13 +51,13 @@ const SHORT_KNOBS = {
 };
 
 /** POST a body to the loopback hook server, resolving the decision JSON (how claude calls it). */
-function post(port: number, body: string): Promise<{ status: number; json: any }> {
+function post(port: number, body: string, token?: string): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
       {
         host: "127.0.0.1",
         port,
-        path: FORK_HOOK_MARKER_PATH,
+        path: token ? `${FORK_HOOK_MARKER_PATH}/${token}` : FORK_HOOK_MARKER_PATH,
         method: "POST",
         headers: { "content-type": "application/json" },
       },
@@ -198,12 +198,12 @@ test("wiring (a): gate ON — createSession starts a REAL loopback hook server a
   assert.equal(group.hooks[0].type, "http", "the hook is the type:http loopback transport (blocker b)");
   assert.equal(
     group.hooks[0].url,
-    `http://127.0.0.1:${gate.port}${FORK_HOOK_MARKER_PATH}`,
-    "the hook URL carries the LIVE server's loopback port + the fork-owned marker path",
+    `http://127.0.0.1:${gate.port}${FORK_HOOK_MARKER_PATH}/${gate.token}`,
+    "the hook URL carries the LIVE server's loopback port + the fork-owned marker path + the R1.3 token",
   );
 
   // The server at that URL is REAL and FAIL-CLOSED: a malformed body draws a deny, not a hang/500.
-  const { status, json } = await post(gate.port, "this is not json");
+  const { status, json } = await post(gate.port, "this is not json", gate.token);
   assert.equal(status, 200, "the hook server answers (it is really listening on the scratch URL's port)");
   assert.equal(json.hookSpecificOutput.hookEventName, "PreToolUse");
   assert.equal(json.hookSpecificOutput.permissionDecision, "deny", "a malformed payload fails closed");
@@ -260,7 +260,7 @@ test("wiring (b): DENY end-to-end — PreToolUse → REAL server → bound ACP s
   // Simulate the live pump having observed this tool_use id in the JSONL (registerGateToolUses).
   gate.correlator.register("toolu_wired_deny");
 
-  const { status, json } = await post(gate.port, fixturePayload("toolu_wired_deny"));
+  const { status, json } = await post(gate.port, fixturePayload("toolu_wired_deny"), gate.token);
 
   assert.equal(status, 200);
   assert.equal(
@@ -282,14 +282,21 @@ test("wiring (b): DENY end-to-end — PreToolUse → REAL server → bound ACP s
   );
 });
 
-test("wiring (b2): an UNCORRELATED tool_use.id fails closed (deny) without ever prompting Zed", async (t) => {
+test("wiring (b2): a tool_use.id absent from the JSONL is seeded from the HOOK payload and relayed to Zed (FIX gate-deadlock)", async (t) => {
+  // DESIGN CHANGE 2026-06-25 (proven live): the claude flushes the `tool_use` line to the JSONL only
+  // AFTER the hook decision, so the old "absent from JSONL → deny" rule DEADLOCKED every gated tool
+  // (Bash/Agent/ToolSearch all timed out → denied; the permission dialog never appeared). The
+  // PreToolUse hook payload IS the authoritative tool_use.id, so the gate now seeds the correlator
+  // from it (`ensureRegistered`) and relays the dialog to Zed — the decision follows the user's choice
+  // (here Zed allows). The JSONL-forgery defense is deliberately relaxed (the hook is loopback-local
+  // from the real claude). STILL fail-closed: an unparseable/id-less payload (separate test) and a
+  // DUPLICATE / re-entrant id (correlator.decide — `ensureRegistered` only seeds when count==0).
   const { calls, gate } = await setupGatedAgent(t, () => ALLOW_OPTION_ID);
 
-  // Nothing registered for this id: the bounded correlation wait expires, then deny — never approve.
-  const { json } = await post(gate.port, fixturePayload("toolu_ghost"));
+  const { json } = await post(gate.port, fixturePayload("toolu_ghost"), gate.token);
 
-  assert.equal(json.hookSpecificOutput.permissionDecision, "deny", "uncorrelated → deny, not approve");
-  assert.equal(calls.length, 0, "no Zed prompt is raised for an uncorrelated call");
+  assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "hook-sourced id is relayed; follows Zed's allow");
+  assert.equal(calls.length, 1, "exactly one session/request_permission is raised for the hook-sourced tool");
 });
 
 // === (b3) Story 046 (R3) — the decider HONORS the live permission mode before relaying to Zed ======
@@ -304,6 +311,7 @@ test("wiring (b3): bypassPermissions auto-allows ANY tool WITHOUT raising a Zed 
   const { json } = await post(
     gate.port,
     fixturePayload("toolu_bypass", "Bash", { command: "rm -rf /" }, "bypassPermissions"),
+    gate.token,
   );
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "bypassPermissions auto-allows");
   assert.equal(calls.length, 0, "bypass never raises session/request_permission (selector honored, not overridden)");
@@ -314,6 +322,7 @@ test("wiring (b4): acceptEdits auto-allows an EDIT-class tool WITHOUT a Zed prom
   const { json } = await post(
     gate.port,
     fixturePayload("toolu_edit", "Write", { file_path: "/tmp/x", content: "hi" }, "acceptEdits"),
+    gate.token,
   );
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "acceptEdits auto-allows edit-class tools");
   assert.equal(calls.length, 0, "an auto-allowed edit never prompts Zed");
@@ -325,6 +334,7 @@ test("wiring (b5): acceptEdits does NOT auto-allow a NON-edit tool — it still 
   const { json } = await post(
     gate.port,
     fixturePayload("toolu_accept_bash", "Bash", { command: "ls" }, "acceptEdits"),
+    gate.token,
   );
   assert.equal(calls.length, 1, "a non-edit tool under acceptEdits still raises a Zed prompt (only edits auto-allow)");
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "and Zed's decision is enforced on the fall-through");

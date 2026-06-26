@@ -19,7 +19,9 @@
 // server seam.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { appendFileSync } from "node:fs";
 import { LOOPBACK_HOST } from "../gate/port.js";
+import { FORK_HOOK_MARKER_PATH } from "../gate/settings-writer.js";
 import { allowDecision, denyDecision, type HookResponse } from "./deny.js";
 
 /** The §9 `PreToolUse` http payload shape (GATE_FINDINGS keystone 1.3). All fields optional on parse
@@ -33,6 +35,9 @@ export interface PreToolUsePayload {
   tool_name?: string;
   tool_input?: unknown;
   tool_use_id?: string;
+  /** Story 055 (R2.1) — present ONLY on a subagent-internal tool: the subagent's own id and type. */
+  agent_id?: string;
+  agent_type?: string;
 }
 
 /** The normalized tool call forwarded to the decider (camelCase, the shape request-permission uses). */
@@ -42,6 +47,11 @@ export interface ForwardedToolCall {
   toolUseId: string;
   sessionId?: string;
   permissionMode?: string;
+  /** Story 055 (R2.1) — the subagent's own id (`agent_id`); undefined for a main-chain tool. */
+  agentId?: string;
+  /** Story 055 (R2.1/R2.2) — the subagent's type (`agent_type`); the dialog label source. Undefined
+   *  for a main-chain tool. There is NO parent tool_use.id in the payload (grouping is best-effort). */
+  agentType?: string;
 }
 
 /** The decider the server forwards each tool call to; returns the enforced `'allow'`/`'deny'`. */
@@ -75,6 +85,13 @@ export interface StartHookServerOptions {
   createHttpServer?: () => Server;
   /** Optional diagnostics sink for fail-closed events (defaults to no-op). */
   onWarn?: (message: string) => void;
+  /**
+   * Story 055 (R1.3) — per-session secret token. WHEN set, a POST whose request path is not exactly
+   * `${FORK_HOOK_MARKER_PATH}/<token>` FAILS CLOSED (deny) WITHOUT invoking the decider — the
+   * compensating control for the relaxed JSONL anti-forgery. WHEN undefined, no token is enforced
+   * (the pre-055 behavior, used by the unit tests that construct the server directly).
+   */
+  token?: string;
 }
 
 /** Default decider timeout (ms) — long enough for an async Zed decision relay, short of a hang. */
@@ -129,6 +146,10 @@ export function parsePayload(raw: string): ForwardedToolCall | null {
     toolUseId,
     sessionId: typeof parsed.session_id === "string" ? parsed.session_id : undefined,
     permissionMode: typeof parsed.permission_mode === "string" ? parsed.permission_mode : undefined,
+    // R2.1 — carry the subagent attribution the §9 payload already ships (today they are dropped). A
+    // main-chain payload omits them → both stay undefined.
+    agentId: typeof parsed.agent_id === "string" ? parsed.agent_id : undefined,
+    agentType: typeof parsed.agent_type === "string" ? parsed.agent_type : undefined,
   };
 }
 
@@ -182,6 +203,7 @@ export function startHookServer(opts: StartHookServerOptions): Promise<HookServe
     deciderTimeoutMs = DEFAULT_DECIDER_TIMEOUT_MS,
     createHttpServer = createServer,
     onWarn,
+    token,
   } = opts;
 
   let decider: ToolCallDecider | undefined = opts.onToolCall;
@@ -194,6 +216,33 @@ export function startHookServer(opts: StartHookServerOptions): Promise<HookServe
       let call: ForwardedToolCall | null = null;
       try {
         const raw = await readBody(req);
+        // DIAGNOSTIC (env-gated, off by default): capture EVERY raw PreToolUse POST the fork's
+        // hook-server receives — including the subagent-attributed fields (agent_id/agent_type) that
+        // parsePayload drops — so a live run can verify whether subagent-internal tools POST at all.
+        if (process.env.FORK_HOOK_LOG_RAW) {
+          try {
+            appendFileSync(process.env.FORK_HOOK_LOG_RAW, raw + "\n");
+          } catch {
+            // best-effort diagnostic — never let logging fail the request
+          }
+        }
+        // R1.3 (story 055): validate the per-session token from the request path BEFORE the decider.
+        // A POST that does not present `${FORK_HOOK_MARKER_PATH}/<token>` is denied without ever
+        // reaching the decider — the forge-resistance that compensates the payload-seeded correlation.
+        if (token !== undefined) {
+          const urlPath = (req.url ?? "").split("?")[0];
+          if (urlPath !== `${FORK_HOOK_MARKER_PATH}/${token}`) {
+            onWarn?.(
+              `[gate §9] FAIL CLOSED: PreToolUse POST presented a missing/incorrect per-session token ` +
+                `(url path "${urlPath}") — denying WITHOUT invoking the decider.`,
+            );
+            writeDecision(
+              res,
+              denyDecision({ toolName: "(unauthorized)", toolUseId: "(unauthorized)" }),
+            );
+            return;
+          }
+        }
         call = parsePayload(raw);
         if (call === null) {
           onWarn?.(

@@ -32,10 +32,10 @@ const KNOBS = {
   closeTimeoutMs: 1000,
 };
 
-function post(port: number, body: string): Promise<{ status: number; json: any }> {
+function post(port: number, body: string, token?: string): Promise<{ status: number; json: any }> {
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path: FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
+      { host: "127.0.0.1", port, path: token ? `${FORK_HOOK_MARKER_PATH}/${token}` : FORK_HOOK_MARKER_PATH, method: "POST", headers: { "content-type": "application/json" } },
       (res) => {
         let data = "";
         res.setEncoding("utf8");
@@ -64,6 +64,10 @@ function payload(toolUseId: string) {
     tool_name: "Bash",
     tool_input: { command: "ls" },
     tool_use_id: toolUseId,
+    // Story 055 (R2.1/R2.3): a subagent tool POSTs its agent_id/agent_type — the signal that lets the
+    // gate run the best-effort parent-grouping wait (so the row registering MID-WAIT is still grouped).
+    agent_id: "agent_renudge",
+    agent_type: "general-purpose",
   });
 }
 
@@ -100,10 +104,12 @@ async function setup(t: any) {
 test("4.2 a sidechain id that registers MID-WAIT resolves to a clean match and raises the dialog (re-nudge)", async (t) => {
   const { calls, session, gate } = await setup(t);
 
-  // Register the inner id ~100ms after the hook fires — inside the 800ms wait window. Before the fix
-  // the decider only checks the main-chain feed and would expire → silent deny with NO dialog.
+  // Register the sidechain PARENT row ~100ms after the hook fires — inside the wait window. STORY 055:
+  // the INNER id is seeded by decide()'s ensureRegistered (the deadlock fix), so the pump must NOT
+  // re-register it here (a second register would mark it a DUPLICATE → deny; in live the pump's own
+  // register lands POST-decision, harmless). Only the PARENT grouping lands mid-wait, and the
+  // best-effort waitForSubagentParent re-nudge catches it so the dialog attaches under the parent.
   setTimeout(() => {
-    gate.correlator.register("toolu_late_inner");
     session.sidechainParentMap = session.sidechainParentMap ?? new Map();
     session.sidechainParentMap.set("toolu_late_inner", {
       id: "toolu_late_inner",
@@ -113,7 +119,7 @@ test("4.2 a sidechain id that registers MID-WAIT resolves to a clean match and r
     });
   }, 100);
 
-  const { json } = await post(gate.port, payload("toolu_late_inner"));
+  const { json } = await post(gate.port, payload("toolu_late_inner"), gate.token);
 
   assert.equal(json.hookSpecificOutput.permissionDecision, "allow", "the mid-wait registration is honored → allow, not a timeout deny");
   assert.equal(calls.length, 1, "exactly one dialog is raised once the lagging sidechain row lands");
