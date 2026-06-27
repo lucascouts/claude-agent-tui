@@ -1,9 +1,10 @@
-// Story 025 / Group 3 (R3.1, R3.2) — the optional, default-OFF UNSTABLE `usage_update`
-// mapping. `usage_update` exists ONLY in the @agentclientprotocol/sdk 0.22.1 schema and is
+// Story 025 / Group 3 (R3.1, R3.2) — the optional UNSTABLE `usage_update` mapping.
+// `usage_update` exists ONLY in the @agentclientprotocol/sdk 0.22.1 schema and is
 // best-effort per §1; it maps the JSONL message-event `usage.{input,output}_tokens` into the
-// SDK's { sessionUpdate:"usage_update", size, used } shape. The feature defaults OFF and stays
-// OFF in production until the live-Zed acceptance probe (Task 3.3, R8) confirms the user's Zed
-// tolerates it. A rejected emission is suppressed by the pump's per-session latch (Task 5.1).
+// SDK's { sessionUpdate:"usage_update", size, used } shape. Story 042 FLIPPED the default to ON
+// (story 039 confirmed the user's Zed ACCEPTS+RENDERS it by code); only the explicit opt-out
+// USAGE_UPDATE=0/false disables it (see usage-env.ts). A rejected emission is still suppressed by
+// the pump's per-session reject latch (Task 5.1, R8).
 //
 // Kept a self-contained module (cf. diff-source.ts) imported by the acp-agent pump; it does
 // NOT go through lib.ts (the frozen upstream export surface).
