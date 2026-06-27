@@ -1,0 +1,14 @@
+# gitleaks config — keeps the full default ruleset and only adds an allowlist
+# for FAKE, token-like fixtures used by the story-055 unit tests (they exercise
+# per-session token URL building; none are real secrets). Without this, the
+# default `generic-api-key` rule flags the high-entropy hex literal in
+# settings-writer-token.test.ts as a leak and fails CI.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake per-session tokens in story-055 unit-test fixtures (not real secrets)"
+paths = [
+  '''test/settings-writer-token\.test\.ts''',
+  '''test/hook-server-token\.test\.ts''',
+]
