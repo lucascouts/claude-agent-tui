@@ -42,6 +42,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import {
   deleteSession,
+  getSessionInfo,
   listSessions,
   ModelInfo,
   Options,
@@ -113,6 +114,7 @@ import { createTurnResolver } from "./end-of-turn.js";
 import type { DetectorSchedule, EndOfTurnDetector } from "./end-of-turn.js";
 import { sendPrompt } from "./engine-pty.js";
 import { MODEL_CATALOG, DEFAULT_MODEL_INFO } from "./model-catalog.js";
+import { discoverAgents, type AgentCatalogEntry } from "./agent-catalog.js";
 import { setupSessionGate } from "./permissions/gate-wiring.js";
 import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gate-wiring.js";
 
@@ -170,6 +172,13 @@ type Session = {
    * was surfaced in an earlier pump). Per-session — sub-agent row uuids are session-scoped.
    */
   emittedNested: Set<string>;
+  /**
+   * Story 056 (#812) — the last session title pushed to the client via `session_info_update` at the
+   * story-024 turn boundary. Used to DEDUP: `emitSessionTitleUpdate` skips the push when the freshly
+   * sanitized `getSessionInfo().summary` equals this. Undefined until the first non-empty title is
+   * pushed; per-session (titles are session-scoped).
+   */
+  lastEmittedTitle?: string;
   /** Story 054 — per-session dedup Set of sidechain inner tool_use ids already fed to the gate
    *  correlator (R3 exactly-once). Lazy-init on the gated pump path; absent on a no-gate session. */
   registeredSidechain?: Set<string>;
@@ -187,6 +196,15 @@ type Session = {
   accumulatedUsage: AccumulatedUsage;
   modes: SessionModeState;
   modelInfos: ModelInfo[];
+  /**
+   * Story 056 (R3.2) — the main-thread agent personas discovered for this session's cwd at
+   * create time ({@link discoverAgents}, glob-only). Stored so the model-change reconcile in
+   * {@link setSessionConfigOption} can REBUILD the `agent` configOption without re-globbing the
+   * disk. The CURRENT agent is NOT held here — it lives in the `agent` configOption's
+   * `currentValue` (mirroring `currentEffort`); `[]`/absent means no personas were discovered and
+   * the `agent` option is omitted entirely (upstream #794 `agents.length > 0` gate).
+   */
+  agents?: AgentCatalogEntry[];
   configOptions: SessionConfigOption[];
   /** Context window size of the last top-level assistant model, carried across
    *  prompts so mid-stream usage_update notifications report a correct `size`
@@ -359,6 +377,14 @@ export interface StartEngineArgs {
    */
   effortLevel?: string;
   /**
+   * Story 056 (R3.2): the seeded/re-spawn main-thread agent persona, forwarded to the spawn as
+   * `--agent "<name>"` (non-"default" only — the spawn layer drops the literal "default" sentinel,
+   * exactly like `--effort`/`--permission-mode`). Threaded to BOTH the fresh ({@link
+   * createSessionEngine}) and resume ({@link spawnResumePty}) paths so the agent-selecting re-spawn
+   * carries it. The persona name is allowlist-safe at the catalog boundary ({@link discoverAgents}).
+   */
+  agent?: string;
+  /**
    * Story 046 (R3.4 LIVE FIX): this resume is an IN-PLACE re-spawn ({@link respawnSession} for a
    * dontAsk/bypass mode or an effort change), NOT a fork/resume of an already-lived session. An
    * in-place re-spawn can fire BEFORE the first interaction (e.g. a boot-time `bypassPermissions`
@@ -465,6 +491,24 @@ export interface AgentDeps {
    * cannot be overridden. Tests inject short windows here; production passes nothing.
    */
   gateOptions?: Omit<SessionGateOptions, "client" | "onWarn">;
+  /**
+   * Story 056 (R3.2) — override the main-thread agent-persona discovery `createSession` seeds the
+   * `agent` configOption from (default: the glob-only {@link discoverAgents}). Injected by the unit
+   * tests with an in-memory fake so the surface is exercised hermetically, never touching the real
+   * `~/.claude/agents`. Production passes nothing → the real disk glob.
+   */
+  discoverAgents?: (cwd: string) => AgentCatalogEntry[];
+  /**
+   * Story 056 (#812) — override the SDK session-metadata reader the end-of-turn `session_info_update`
+   * push sources the title from (default: the pure {@link getSessionInfo} from the agent SDK, which
+   * resolves the session's `summary` from its JSONL — custom title, auto-summary, or first prompt).
+   * Injected by the unit tests with an in-memory fake so the push is exercised hermetically, never
+   * touching the real `~/.claude` transcript tree. Production passes nothing → the real SDK reader.
+   */
+  getSessionInfo?: (
+    sessionId: string,
+    options?: { dir?: string },
+  ) => Promise<{ summary: string } | undefined>;
 }
 
 /**
@@ -515,6 +559,8 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       // SAME sessionId carrying its mode/effort flags through the resume argv (buildResumeArgv).
       permissionMode: args.permissionMode,
       effortLevel: args.effortLevel,
+      // Story 056 (R3.2): an agent-selecting re-spawn carries the persona through too (--agent).
+      agent: args.agent,
     });
     if (args.inPlaceRespawn) {
       // === SEAM(046 R3.4 LIVE FIX): DEFER discovery for an in-place re-spawn ======================
@@ -593,6 +639,8 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // the fresh spawn (non-"default" only; "default"/undefined keep the byte-for-byte pre-046 argv).
     permissionMode: args.permissionMode,
     effortLevel: args.effortLevel,
+    // Story 056 (R3.2): the agent-selecting re-spawn's persona → `--agent "<name>"` (non-"default").
+    agent: args.agent,
     // Story 034 (§9): the per-session gate scratch settings, already on disk — claude reads them at
     // startup, so the hook gates the FIRST tool call (blocker c). Absent → ungated (pre-034) spawn.
     settingsFile: args.settingsFile,
@@ -1079,6 +1127,14 @@ export class ClaudeAcpAgent implements Agent {
   private readonly gateEnabled: boolean;
   /** Story 034 — gate tuning knobs forwarded to setupSessionGate; see {@link AgentDeps.gateOptions}. */
   private readonly gateOptions?: Omit<SessionGateOptions, "client" | "onWarn">;
+  /** Story 056 (R3.2) — main-thread agent-persona discovery seam; see {@link AgentDeps.discoverAgents}. */
+  private readonly discoverAgents: (cwd: string) => AgentCatalogEntry[];
+  /** Story 056 (#812) — SDK session-metadata reader for the end-of-turn title push; see
+   *  {@link AgentDeps.getSessionInfo}. */
+  private readonly getSessionInfo: (
+    sessionId: string,
+    options?: { dir?: string },
+  ) => Promise<{ summary: string } | undefined>;
   /** Live PTY-engine registry shared with the per-session engines (story 014 cleanup map). */
   private readonly engines: Map<string, SessionEngine> = new Map();
 
@@ -1122,6 +1178,12 @@ export class ClaudeAcpAgent implements Agent {
     // OFF at this seam so directly-constructed test agents spin no gate unless they opt in.
     this.gateEnabled = deps.gate ?? false;
     this.gateOptions = deps.gateOptions;
+    // Story 056 (R3.2): main-thread agent-persona discovery — defaults to the glob-only
+    // discoverAgents; tests inject an in-memory fake so the `agent` surface is hermetic.
+    this.discoverAgents = deps.discoverAgents ?? discoverAgents;
+    // Story 056 (#812): end-of-turn session_info_update title source — defaults to the pure SDK
+    // getSessionInfo; tests inject an in-memory fake so the push is hermetic (no real ~/.claude read).
+    this.getSessionInfo = deps.getSessionInfo ?? getSessionInfo;
   }
 
   async initialize(request: InitializeRequest): Promise<InitializeResponse> {
@@ -1391,6 +1453,10 @@ export class ClaudeAcpAgent implements Agent {
       schedule: this.schedule,
       sessionId: params.sessionId,
       logger: this.logger,
+      // Story 056 (#812): on a REAL end-of-turn boundary (never cancel, never watchdog), push the
+      // sanitized session title via session_info_update. `void` = fire-and-forget — the async method
+      // is never awaited, so it cannot delay the `return await promise` below (R5.1).
+      onTurnResolved: () => void this.emitSessionTitleUpdate(params.sessionId),
     });
     sessionRecord.turnDetector = detector;
     sessionRecord.turnCancel = cancel;
@@ -1421,6 +1487,33 @@ export class ClaudeAcpAgent implements Agent {
       sessionRecord.subagentWatcher = undefined;
       // Story 046 (R1.3): the session is idle again — flush any model switch deferred mid-turn.
       this.flushPendingControlInjections(sessionRecord);
+    }
+  }
+
+  /**
+   * Story 056 (#812) — push the sanitized session title to the client via `session_info_update`,
+   * fired (fire-and-forget) by the story-024 end-of-turn boundary ONLY (never on cancel/watchdog,
+   * via {@link TurnResolverOptions.onTurnResolved}). DEDUPED against {@link Session.lastEmittedTitle}
+   * so an unchanged title is not re-emitted, and silent when `getSessionInfo` finds no transcript /
+   * the title is empty. Every error is swallowed and logged — this MUST NEVER reject the turn (it is
+   * never awaited in `prompt()`), and a slow/never-resolving reader cannot delay the PromptResponse.
+   */
+  private async emitSessionTitleUpdate(sessionId: string): Promise<void> {
+    const session = this.sessions[sessionId];
+    if (!session) return;
+    try {
+      const info = await this.getSessionInfo(sessionId, { dir: session.cwd });
+      if (!info) return; // no transcript / not found → nothing to push
+      const title = sanitizeTitle(info.summary);
+      if (!title || title === session.lastEmittedTitle) return; // dedup + never push empty
+      session.lastEmittedTitle = title;
+      await this.client.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: "session_info_update", title },
+      });
+    } catch (err) {
+      // Swallow — never reject the turn (this method is never awaited from prompt()).
+      this.logger.error("[acp-agent] session title push (#812) failed:", err);
     }
   }
 
@@ -1610,6 +1703,11 @@ export class ClaudeAcpAgent implements Agent {
       // re-spawns in place with `--effort <level>` (idle-guarded, R3.7 failure path). On throw, the
       // applyConfigOptionValue below is skipped so the prior currentValue stays unchanged.
       await this.applyEffortChange(params.sessionId, session, resolvedValue);
+    } else if (params.configId === "agent") {
+      // Story 056 (R3.3/R3.4): the agent persona has no live mid-session path either — apply it by an
+      // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
+      // skipped so the prior currentValue stays unchanged (R3.7-style failure path).
+      await this.applyAgentChange(params.sessionId, session, resolvedValue);
     }
 
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
@@ -1802,12 +1900,14 @@ export class ClaudeAcpAgent implements Agent {
    * Order is load-bearing for R3.7: re-spawn FIRST, and swap in + tear down the old PTY ONLY once the new
    * one is live — so a failed re-spawn leaves the prior PTY/currentValue intact (never
    * torn-down-without-replacement). Re-spawn runs only while idle, so the old PTY has no pending turn to
-   * double-resolve. The `respawning` latch defers concurrent selector changes (R3.8).
+   * double-resolve. The `respawning` latch defers concurrent selector changes (R3.8). Re-spawning for
+   * ONE selector preserves the OTHER two (mode / effort / agent — Story 056 added agent) by reading
+   * their current values, so the resume argv always carries all three flags.
    */
   private async respawnSession(
     sessionId: string,
     session: Session,
-    change: { permissionMode?: string; effortLevel?: string },
+    change: { permissionMode?: string; effortLevel?: string; agent?: string },
   ): Promise<void> {
     // Story 046 (R3.4 LIVE FIX guard): a re-spawn reattaches via `claude --resume <id>`, which needs the
     // transcript to ALREADY exist. Before the first interaction it is absent, so --resume falls back
@@ -1824,10 +1924,13 @@ export class ClaudeAcpAgent implements Agent {
     session.respawning = true;
     try {
       const oldEngine = session.engine;
-      // Preserve the OTHER selector's current value so re-spawning for one (mode OR effort) does not
-      // reset the other — the resume argv carries both flags.
+      // Preserve the OTHER selectors' current values so re-spawning for one (mode, effort, OR agent)
+      // does not reset the others — the resume argv carries all three flags. There are three selectors
+      // now (Story 056 added agent): a mode re-spawn keeps effort+agent, an effort re-spawn keeps
+      // mode+agent, and an agent re-spawn keeps mode+effort.
       const permissionMode = change.permissionMode ?? session.modes.currentModeId;
       const effortLevel = change.effortLevel ?? this.currentEffort(session);
+      const agent = change.agent ?? this.currentAgent(session);
       // Re-spawn through the SAME startEngine seam createSession uses, reusing the sessionId so the
       // transcript is reattached (R3.4); the flags flow into the flag-carrying resume argv.
       const started = await this.startEngine({
@@ -1839,6 +1942,7 @@ export class ClaudeAcpAgent implements Agent {
         inPlaceRespawn: true,
         permissionMode,
         effortLevel,
+        agent,
         sessions: this.engines,
         onEvent: (sid) => void this.pumpUpdates(sid),
       });
@@ -1862,6 +1966,12 @@ export class ClaudeAcpAgent implements Agent {
     return typeof opt?.currentValue === "string" ? opt.currentValue : undefined;
   }
 
+  /** Story 056 — the session's current agent configOption value (undefined when no agent option). */
+  private currentAgent(session: Session): string | undefined {
+    const opt = session.configOptions.find((o) => o.id === "agent");
+    return typeof opt?.currentValue === "string" ? opt.currentValue : undefined;
+  }
+
   /**
    * Story 046 (R2.2, design §7) — apply a reasoning-effort change. Probe B verdict: effort has no live
    * mid-session mechanism (`--effort` is a spawn flag), so a change re-spawns in place with the flag
@@ -1881,6 +1991,25 @@ export class ClaudeAcpAgent implements Agent {
       );
     }
     await this.respawnSession(sessionId, session, { effortLevel: level });
+  }
+
+  /**
+   * Story 056 (R3.3/R3.4) — apply a main-thread agent-persona change. Like effort, the persona has no
+   * live mid-session mechanism (`--agent "<name>"` is a spawn flag), so a change re-spawns in place
+   * carrying the flag (mirroring {@link applyEffortChange}), idle-guarded, with the R3.7 failure path
+   * and the R3.8 latch. A no-op change (same persona, with the "default" sentinel as the no-persona
+   * baseline) applies nothing. Throwing here leaves the caller's applyConfigOptionValue unrun, so the
+   * prior currentValue is left unchanged on failure (R3.7). Optimistic-on-apply, like effort: there is
+   * no transcript drift event for the agent persona, so it is NOT reconciled afterward (R4.3).
+   */
+  private async applyAgentChange(sessionId: string, session: Session, agent: string): Promise<void> {
+    if (agent === (this.currentAgent(session) ?? "default")) return; // no value change → no-op
+    if (session.turnDetector !== undefined || session.respawning) {
+      throw new Error(
+        "Cannot change agent while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
+      );
+    }
+    await this.respawnSession(sessionId, session, { agent });
   }
 
   /**
@@ -2478,11 +2607,19 @@ export class ClaudeAcpAgent implements Agent {
       const effortOpt = session.configOptions.find((o) => o.id === "effort");
       const currentEffort =
         typeof effortOpt?.currentValue === "string" ? effortOpt.currentValue : undefined;
+      // Story 056 (R3.2): preserve the `agent` option across a model switch — re-read its current
+      // value and rebuild from the session's stored catalog (no re-glob). `session.agents ?? []`
+      // keeps the option absent when none were discovered (the gate).
+      const agentOpt = session.configOptions.find((o) => o.id === "agent");
+      const currentAgent =
+        typeof agentOpt?.currentValue === "string" ? agentOpt.currentValue : undefined;
       session.configOptions = buildConfigOptions(
         session.modes,
         value,
         session.modelInfos,
         currentEffort,
+        session.agents ?? [],
+        currentAgent,
       );
 
       // === SEAM(023) Group 1: the SDK effort sync (query.applyFlagSettings) after a model switch is
@@ -2705,11 +2842,19 @@ export class ClaudeAcpAgent implements Agent {
       currentModeId: seededMode,
       availableModes,
     };
+    // Story 056 (R3.2): discover the main-thread agent personas for THIS session's cwd (glob-only via
+    // the injectable seam). When ≥1 is found, buildConfigOptions surfaces the 4th `agent` dropdown
+    // (seeded "default" = no persona at fresh create); when none, the option is omitted. The catalog
+    // is stored on the session record below so the model-change reconcile rebuilds it WITHOUT
+    // re-globbing.
+    const agents = this.discoverAgents(params.cwd);
     const configOptions = buildConfigOptions(
       modes,
       DEFAULT_MODEL_INFO.value,
       MODEL_CATALOG,
       settingsManager.getSettings().effortLevel,
+      agents,
+      undefined,
     );
 
     // Runtime cwd is read from inside the JSONL (story 015); fall back to the requested host cwd
@@ -2737,6 +2882,7 @@ export class ClaudeAcpAgent implements Agent {
       },
       modes,
       modelInfos: MODEL_CATALOG,
+      agents,
       configOptions,
       contextWindowSize:
         inferContextWindowFromModel(DEFAULT_MODEL_INFO.value) ?? DEFAULT_CONTEXT_WINDOW,
@@ -2817,6 +2963,8 @@ function buildConfigOptions(
   currentModelId: string,
   modelInfos: ModelInfo[],
   currentEffortLevel?: string,
+  agents: AgentCatalogEntry[] = [],
+  currentAgent?: string,
 ): SessionConfigOption[] {
   const options: SessionConfigOption[] = [
     {
@@ -2877,6 +3025,28 @@ function buildConfigOptions(
       type: "select",
       currentValue: validEffort,
       options: effortOptions,
+    });
+  }
+
+  // Story 056 (R3.2) — the `agent` (main-thread persona) selector, mirroring the effort option but
+  // with a "default" no-persona sentinel. GATED on `agents.length > 0` (upstream #794): when nothing
+  // is discovered the option is OMITTED entirely. The "default" entry = no persona (the spawn layer
+  // already drops the literal "default", exactly like --effort/--permission-mode). The current value
+  // is validated against the discovered set and falls back to "default".
+  if (agents.length > 0) {
+    const agentValues = new Set(agents.map((a) => a.value));
+    const validAgent = currentAgent && agentValues.has(currentAgent) ? currentAgent : "default";
+    options.push({
+      id: "agent",
+      name: "Agent",
+      description: "Main-thread agent persona",
+      category: "model",
+      type: "select",
+      currentValue: validAgent,
+      options: [
+        { value: "default", name: "Default" },
+        ...agents.map((a) => ({ value: a.value, name: a.displayName, description: a.description })),
+      ],
     });
   }
 
@@ -3174,13 +3344,18 @@ export function toAcpNotifications(
         break;
       case "thinking":
       case "thinking_delta":
-        update = {
-          sessionUpdate: "agent_thought_chunk",
-          content: {
-            type: "text",
-            text: chunk.thinking,
-          },
-        };
+        // Story 056 (#793): a signature-only thinking block (thinking.display "omitted") carries empty
+        // text — suppress the agent_thought_chunk rather than emit an empty one (update stays null → no
+        // push at the `if (update)` guard). A non-empty thinking block emits exactly as before.
+        if (chunk.thinking.length > 0) {
+          update = {
+            sessionUpdate: "agent_thought_chunk",
+            content: {
+              type: "text",
+              text: chunk.thinking,
+            },
+          };
+        }
         break;
       case "tool_use":
       case "server_tool_use":

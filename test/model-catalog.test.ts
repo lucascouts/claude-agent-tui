@@ -55,9 +55,10 @@ test("2.1 catalog: at least one entry declares effort support — unlocks the ef
 });
 
 test("2.1 catalog: a non-effort model does NOT advertise effort levels (effort stays hidden for it)", () => {
-  // `default` is the safe fallback — it must not falsely claim effort support, else the effort
-  // selector would appear for a model that can't honor it.
-  const def = MODEL_CATALOG.find((m) => m.value === "default");
-  assert.ok(def, "default entry present");
-  assert.notEqual(def!.supportsEffort, true, "the `default` fallback must not declare effort support");
+  // `haiku`/`opusplan` are the genuine non-effort models — they must not claim effort support, else
+  // the effort selector would appear for a model that can't honor it. (Story 056: `default` NOW
+  // advertises effort for v0.52 parity — pinned by model-catalog-effort.test.ts.)
+  const haiku = MODEL_CATALOG.find((m) => m.value === "haiku");
+  assert.ok(haiku, "haiku entry present");
+  assert.notEqual(haiku!.supportsEffort, true, "a genuine non-effort model (`haiku`) must not declare effort support");
 });

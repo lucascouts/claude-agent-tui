@@ -18,6 +18,7 @@
 import pty from "node-pty";
 import type { IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
+import { isSafeAgentName } from "./agent-catalog.js";
 
 // PTY geometry pinned by §5.
 const PTY_NAME = "xterm-256color";
@@ -106,18 +107,29 @@ export function resolveShell(baseEnv: Record<string, string | undefined> = proce
  * non-"default" mode is emitted as `--permission-mode <mode>`; "default"/undefined emit nothing;
  * `permissionMode: "plan"` reproduces the old planMode=true path. Still interactive-only — adds no
  * `-p`/`stream-json`, billing stays subscription `cli`.
+ *
+ * Story 056 (R3.3): an optional `agent` persona name is emitted as `--agent "<name>"` (DOUBLE-QUOTED,
+ * grouped with the other behavior flags). This is the SECOND layer of the two-layer command-injection
+ * defense — `agent-catalog.ts` already drops any name outside `/^[A-Za-z0-9_-]+$/` at discovery, and
+ * here we re-assert via {@link isSafeAgentName} so an unsafe name is silently DROPPED (no flag), never
+ * interpolated into the `-lc` shell string. Interactive-only — adds no `-p`/`stream-json`.
  */
 export function buildClaudeCmd(
   sessionId: string,
   permissionMode?: string,
   settingsFile?: string,
   effortLevel?: string,
+  agent?: string,
 ): string {
   let cmd = `claude --session-id ${sessionId}`;
   if (permissionMode && permissionMode !== "default") cmd += ` --permission-mode ${permissionMode}`;
   // Story 046 (R2.2): effort is a spawn flag (Probe B verdict — no live mid-session path), so a
   // non-"default" level is seeded/re-spawned with `--effort <level>`. Interactive-only — no credit path.
   if (effortLevel && effortLevel !== "default") cmd += ` --effort ${effortLevel}`;
+  // Story 056 (R3.3): the agent persona, double-quoted, emitted ONLY for a real persona — the "default"
+  // sentinel (= no persona, mirrors --effort/--permission-mode) emits nothing — and only when it passes
+  // the R3.3 allowlist re-assert (defense-in-depth — an unsafe name is dropped, never interpolated).
+  if (agent && agent !== "default" && isSafeAgentName(agent)) cmd += ` --agent "${agent}"`;
   if (settingsFile) cmd += ` --settings "${settingsFile}"`;
   return cmd;
 }
@@ -133,8 +145,9 @@ export function buildSpawnArgv(
   permissionMode?: string,
   settingsFile?: string,
   effortLevel?: string,
+  agent?: string,
 ): [string, string] {
-  return ["-lc", buildClaudeCmd(sessionId, permissionMode, settingsFile, effortLevel)];
+  return ["-lc", buildClaudeCmd(sessionId, permissionMode, settingsFile, effortLevel, agent)];
 }
 
 /** Options for {@link spawnClaudePty}. */
@@ -167,6 +180,13 @@ export interface SpawnPtyOptions {
    * Absent → no flag (the ungated/`FORK_GATE=off` spawn is byte-for-byte pre-034).
    */
   settingsFile?: string;
+  /**
+   * Story 056 (R3.3): a main-thread agent persona name (from `agent-catalog.ts`) emitted as the
+   * interactive-only `--agent "<name>"` spawn flag. DOUBLE-QUOTED and injection-safe — re-asserted
+   * against the R3.3 allowlist (`/^[A-Za-z0-9_-]+$/`) so an unsafe name is dropped, never interpolated.
+   * Absent → no flag. Adds no `-p`/`stream-json`; billing stays subscription `cli`.
+   */
+  agent?: string;
 }
 
 /** Handle returned by {@link spawnClaudePty}; story 014 manages its lifecycle. */
@@ -201,11 +221,12 @@ export function spawnClaudePty(opts: SpawnPtyOptions): PtyEngineHandle {
     permissionMode,
     settingsFile,
     effortLevel,
+    agent,
   } = opts;
 
   const sessionId = randomUUID(); // pre-generated → correlates to the JSONL transcript
   const shell = resolveShell(baseEnv);
-  const argv = buildSpawnArgv(sessionId, permissionMode, settingsFile, effortLevel);
+  const argv = buildSpawnArgv(sessionId, permissionMode, settingsFile, effortLevel, agent);
 
   // Sanitized, subscription-billing env (§5/§10) via the single shared definition.
   const env = buildSanitizedEnv(baseEnv);

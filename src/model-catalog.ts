@@ -19,19 +19,24 @@ const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLevels"]> =
   "low",
   "medium",
   "high",
+  "xhigh",
+  "max",
 ];
 
 /**
  * The static curated catalog advertised to the Zed Agent Panel's `model` selector. Each `value` is a
  * `claude` TUI alias accepted by `/model <alias>` (live) and `--model <alias>` (spawn). `default` is
- * first and is the safe fallback. Effort-capable models (`sonnet`, `opus`) carry the metadata that
- * surfaces the effort selector; `default`/`haiku`/`opusplan` advertise no effort levels.
+ * first and is the safe fallback. Effort-capable models (`default`, `sonnet`, `opus`) carry the
+ * metadata that surfaces the effort selector; `haiku`/`opusplan` advertise no effort levels.
  */
 export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "default",
     displayName: "Default",
-    description: "Use the model the claude TUI is configured with (safe fallback).",
+    description:
+      "Use the model the claude TUI is configured with (safe fallback); supports reasoning effort.",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
   },
   {
     value: "sonnet",

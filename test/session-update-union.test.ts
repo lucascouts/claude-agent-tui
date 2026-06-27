@@ -4,20 +4,20 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// Story 011 / Task 4.1 (updated by story 045, then story 047) — lock that the
+// Story 011 / Task 4.1 (updated by story 045, 047, then story 056) — lock that the
 // `SessionUpdate` discriminated union is reused 1:1 from `@agentclientprotocol/sdk`
-// 0.28.1: no local redefinition or unexpected shape drift, proving the ACP schema
+// 1.0.0: no local redefinition or unexpected shape drift, proving the ACP schema
 // layer is kept 1:1.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const forkRoot = join(here, "..");
 const sdkRoot = join(forkRoot, "node_modules", "@agentclientprotocol", "sdk");
 
-// The 0.28.1 discriminant set (the `sessionUpdate` literal of each variant).
+// The 1.0.0 discriminant set (the `sessionUpdate` literal of each variant).
 // 0.25.0 added `plan_update` and `plan_removed` to the union (additive vs 0.22.1).
-// 0.28.1 (schema v1.14.0) did NOT change the SessionUpdate discriminant set — the
-// v1.14.0 delta is additive elsewhere (e.g. PlanUpdateContent internals); these 13
-// variants are unchanged. Nothing was removed (story 047 — SDK bump 0.25→0.28.1).
+// The 0.28.1 → 1.0.0 major bump (story 056) did NOT change the SessionUpdate
+// discriminant set — the 1.0.0 delta is additive elsewhere; these 13 variants are
+// unchanged (verified ADDED=[] / REMOVED=[] vs the 0.28.1 set). Nothing was removed.
 const EXPECTED_VARIANTS = [
   "user_message_chunk",
   "agent_message_chunk",
@@ -34,9 +34,9 @@ const EXPECTED_VARIANTS = [
   "usage_update",
 ];
 
-test("session update union: the ACP SDK is pinned to 0.28.1", () => {
+test("session update union: the ACP SDK is pinned to 1.0.0", () => {
   const pkg = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "0.28.1", "the ACP schema/transport SDK is pinned at 0.28.1 (story 047)");
+  assert.equal(pkg.version, "1.0.0", "the ACP schema/transport SDK is pinned at 1.0.0 (story 056)");
 });
 
 test("session update union: SessionUpdate is not redefined or shadowed in fork src", () => {
@@ -50,7 +50,7 @@ test("session update union: SessionUpdate is not redefined or shadowed in fork s
   }
 });
 
-test("session update union: variant set matches SDK 0.28.1 (no unexpected shape drift)", () => {
+test("session update union: variant set matches SDK 1.0.0 (no unexpected shape drift)", () => {
   const dts = readFileSync(join(sdkRoot, "dist", "schema", "types.gen.d.ts"), "utf8");
   const declIdx = dts.indexOf("export type SessionUpdate =");
   assert.ok(declIdx !== -1, "SessionUpdate union must be defined in the SDK type surface");
@@ -62,7 +62,7 @@ test("session update union: variant set matches SDK 0.28.1 (no unexpected shape 
   assert.deepEqual(
     [...found].sort(),
     [...EXPECTED_VARIANTS].sort(),
-    "the SessionUpdate discriminated-union variant set drifted from the expected 0.28.1 set",
+    "the SessionUpdate discriminated-union variant set drifted from the expected 1.0.0 set",
   );
 });
 

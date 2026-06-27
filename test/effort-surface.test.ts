@@ -78,8 +78,10 @@ test("3.1 selecting an effort-capable catalog model surfaces the `effort` config
 });
 
 test("3.1 selecting a NON-effort model leaves the `effort` configOption absent (R2.1 — hidden)", async (t) => {
-  const nonEffort = MODEL_CATALOG.find((m) => m.value === "default") ?? MODEL_CATALOG.find((m) => m.supportsEffort !== true);
-  assert.ok(nonEffort, "the catalog must include a non-effort model (the `default` fallback)");
+  // Story 056: `default` now advertises effort (v0.52 parity), so the genuine non-effort model is
+  // `haiku` (fallback: any model that does not declare effort).
+  const nonEffort = MODEL_CATALOG.find((m) => m.value === "haiku") ?? MODEL_CATALOG.find((m) => m.supportsEffort !== true);
+  assert.ok(nonEffort, "the catalog must include a non-effort model (e.g. `haiku`)");
 
   const agent = makeAgent();
   t.after(() => agent.dispose());

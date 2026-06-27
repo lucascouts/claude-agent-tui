@@ -483,6 +483,12 @@ export interface TurnResolverOptions {
   logger?: StopReasonLogger;
   deltaTMs?: number;
   watchdogMs?: number;
+  /**
+   * Story 056 (#812) — fired EXACTLY ONCE, ONLY on a real end-of-turn boundary (NOT on cancel, NOT
+   * on watchdog timeout), AFTER the prompt resolves. Fire-and-forget; the callback MUST NOT
+   * throw/block.
+   */
+  onTurnResolved?: () => void;
 }
 
 /** A detector paired with the awaitable {@link PromptResponse} the prompt() loop returns. */
@@ -529,7 +535,13 @@ export function createTurnResolver(opts: TurnResolverOptions = {}): TurnResolver
 
   const detector = createEndOfTurnDetector({
     onEndOfTurn: (boundary) =>
-      settle(() => resolveFn({ stopReason: mapStopReason(readStopReason(boundary), opts.logger) })),
+      // Story 056 (#812): fire onTurnResolved inside the SAME settle, AFTER the prompt resolves, so it
+      // runs EXACTLY ONCE per real end-of-turn. cancel() and onTurnTimeout intentionally do NOT call
+      // it — the settle latch + the detector's firedUuids guarantee a single call per turn.
+      settle(() => {
+        resolveFn({ stopReason: mapStopReason(readStopReason(boundary), opts.logger) });
+        opts.onTurnResolved?.();
+      }),
     onTurnTimeout: (error) => settle(() => rejectFn(error)),
     schedule: opts.schedule,
     sessionId: opts.sessionId,

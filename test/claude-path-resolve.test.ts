@@ -18,7 +18,10 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { resolveClaudePath } from "../src/claude-path.ts";
-import { buildClaudeCmd } from "../src/engine-pty.ts";
+// Story 056: engine-pty gained its first src→src import (./agent-catalog.js for the R3.3 name guard),
+// which does not resolve from src/ under --experimental-strip-types; import the built module (the
+// dominant test convention — dist over src) so the compiled `./agent-catalog.js` resolves.
+import { buildClaudeCmd } from "../dist/engine-pty.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, "..", "src");

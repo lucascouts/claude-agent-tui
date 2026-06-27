@@ -30,6 +30,7 @@ import {
   spawnClaudePty,
 } from "./engine-pty.js";
 import type { PtyEngineHandle } from "./engine-pty.js";
+import { isSafeAgentName } from "./agent-catalog.js";
 import { attachAnsiMirror } from "./ansi-mirror.js";
 import type { AnsiMirrorOptions } from "./ansi-mirror.js";
 
@@ -271,16 +272,27 @@ const RESUME_PTY_NAME = "xterm-256color";
  * launch AND the `|| claude` fresh fallback as `--permission-mode <mode>`, so an in-place re-spawn
  * (a dontAsk/bypass switch) reattaches the SAME sessionId/transcript under the new mode. Still no
  * `-p`/`--print`/`stream-json` — billing stays subscription `cli`.
+ *
+ * Story 056 (R3.3): an optional `agent` persona name is likewise carried via `flags` as the
+ * DOUBLE-QUOTED `--agent "<name>"`. Because `flags` is interpolated into BOTH the `--resume "<id>"`
+ * launch AND the `|| claude` fresh fallback, this single addition reaches both branches (R3.3). It is
+ * the SECOND layer of the command-injection defense — re-asserted via {@link isSafeAgentName} so an
+ * unsafe name is DROPPED (no flag), never interpolated. Still no `-p`/`--print`/`stream-json`.
  */
 export function buildResumeArgv(
   sessionId: string,
   permissionMode?: string,
   effortLevel?: string,
+  agent?: string,
 ): [string, string] {
   const pm =
     permissionMode && permissionMode !== "default" ? ` --permission-mode ${permissionMode}` : "";
   const ef = effortLevel && effortLevel !== "default" ? ` --effort ${effortLevel}` : "";
-  const flags = `${pm}${ef}`;
+  // Story 056 (R3.3): double-quoted agent flag, emitted only for a real persona (the "default"
+  // sentinel = no persona emits nothing, mirroring --effort) and only when it passes the R3.3
+  // allowlist re-assert; folded into `flags` so it carries into both the --resume and || claude halves.
+  const ag = agent && agent !== "default" && isSafeAgentName(agent) ? ` --agent "${agent}"` : "";
+  const flags = `${pm}${ef}${ag}`;
   return ["-c", `claude --resume "${sessionId}"${flags} || claude${flags}`];
 }
 
@@ -301,6 +313,12 @@ export interface SpawnResumeOptions {
   permissionMode?: string;
   /** Story 046 (R2.2): carry `--effort <level>` into the resume argv for an effort re-spawn. */
   effortLevel?: string;
+  /**
+   * Story 056 (R3.3): carry the DOUBLE-QUOTED `--agent "<name>"` into the resume argv (both the
+   * `--resume` and the `|| claude` fallback branches). Injection-safe — re-asserted against the R3.3
+   * allowlist so an unsafe name is dropped. Absent → no flag.
+   */
+  agent?: string;
 }
 
 /**
@@ -315,7 +333,7 @@ export function spawnResumePty(opts: SpawnResumeOptions): PtyEngineHandle {
   const { sessionId, cwd, baseEnv = process.env, spawn = pty.spawn } = opts;
 
   const shell = resolveShell(baseEnv);
-  const argv = buildResumeArgv(sessionId, opts.permissionMode, opts.effortLevel);
+  const argv = buildResumeArgv(sessionId, opts.permissionMode, opts.effortLevel, opts.agent);
   const env = buildSanitizedEnv(baseEnv);
 
   // §10 refuse-to-spawn guard (R4.2): abort if any forbidden billing var survived sanitization,
@@ -348,6 +366,12 @@ export interface CreateSessionEngineOptions {
   permissionMode?: string;
   /** Story 046 (R2.2): forwarded to {@link spawnClaudePty} as `--effort <level>` for a non-"default" seed. */
   effortLevel?: string;
+  /**
+   * Story 056 (R3.3): forwarded to {@link spawnClaudePty} as the DOUBLE-QUOTED `--agent "<name>"` for a
+   * fresh spawn seeded to a main-thread agent persona. Injection-safe (R3.3 allowlist re-assert).
+   * Absent → no flag.
+   */
+  agent?: string;
   /**
    * Story 034 (§9 hybrid gate): per-session SCRATCH settings file carrying the fork's
    * `PreToolUse` hook, forwarded to {@link spawnClaudePty} as `--settings "<file>"`. The
@@ -404,6 +428,7 @@ export function createSessionEngine(opts: CreateSessionEngineOptions): SessionEn
     spawn: opts.spawn,
     permissionMode: opts.permissionMode,
     effortLevel: opts.effortLevel,
+    agent: opts.agent,
     settingsFile: opts.settingsFile,
   });
   // ONE watcher, started by the story 015 factory and bound to that same PTY.

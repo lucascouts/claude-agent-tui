@@ -494,7 +494,11 @@ export function toolUpdateFromToolResult(
     "is_error" in toolResult &&
     toolResult.is_error &&
     toolResult.content &&
-    toolResult.content.length > 0
+    toolResult.content.length > 0 &&
+    // Story 056 (#776): a FAILED Bash with a negotiated terminal must still render as terminal
+    // output (terminal_output + terminal_exit exit_code 1 via `case "Bash"`), not markdown — so it
+    // is excluded from this error-only early-return. Every other errored result is unchanged.
+    !(toolUse?.name === "Bash" && supportsTerminalOutput)
   ) {
     // Only return errors
     return toAcpContentUpdate(toolResult.content, true);
