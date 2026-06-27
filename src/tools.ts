@@ -142,8 +142,15 @@ export function toolCallIdFor(
   return options.namespaced ? `${sessionId}:${toolUseId}` : toolUseId;
 }
 
+/** Minimal shape of a raw JSONL `tool_use` block consumed by the tool mappers. */
+interface RawToolUse {
+  name: string;
+  id: string;
+  input?: unknown;
+}
+
 export function toolInfoFromToolUse(
-  toolUse: any,
+  toolUse: RawToolUse,
   supportsTerminalOutput: boolean = false,
   cwd?: string,
 ): ToolInfo {
@@ -384,7 +391,7 @@ export function toolInfoFromToolUse(
       const input = toolUse.input as TodoWriteInput | undefined;
       return {
         title: Array.isArray(input?.todos)
-          ? `Update TODOs: ${input.todos.map((todo: any) => todo.content).join(", ")}`
+          ? `Update TODOs: ${input.todos.map((todo: TodoWriteInput["todos"][number]) => todo.content).join(", ")}`
           : "Update TODOs",
         kind: "think",
         content: [],
@@ -480,7 +487,7 @@ export function toolUpdateFromToolResult(
     | BetaTextEditorCodeExecutionToolResultBlockParam
     | BetaRequestMCPToolResultBlockParam
     | BetaToolSearchToolResultBlockParam,
-  toolUse: any | undefined,
+  toolUse: { name?: string } | undefined,
   supportsTerminalOutput: boolean = false,
 ): ToolUpdate {
   if (
@@ -497,15 +504,15 @@ export function toolUpdateFromToolResult(
     case "Read":
       if (Array.isArray(toolResult.content) && toolResult.content.length > 0) {
         return {
-          content: toolResult.content.map((content: any) => ({
+          content: toolResult.content.map((content: unknown) => ({
             type: "content",
             content:
-              content.type === "text"
+              (content as { type?: string }).type === "text"
                 ? {
                     type: "text",
-                    text: markdownEscape(content.text),
+                    text: markdownEscape((content as { text: string }).text),
                   }
-                : toAcpContentBlock(content, false),
+                : toAcpContentBlock(content as ToolResultContent, false),
           })),
         };
       } else if (typeof toolResult.content === "string" && toolResult.content.length > 0) {
@@ -552,7 +559,7 @@ export function toolUpdateFromToolResult(
         "text" in result[0] &&
         typeof result[0].text === "string"
       ) {
-        output = result.map((c: any) => c.text).join("\n");
+        output = result.map((c: unknown) => (c as { text: string }).text).join("\n");
       }
 
       if (supportsTerminalOutput) {
@@ -610,14 +617,14 @@ export function toolUpdateFromToolResult(
 }
 
 function toAcpContentUpdate(
-  content: any,
+  content: unknown,
   isError: boolean = false,
 ): { content?: ToolCallContent[] } {
   if (Array.isArray(content) && content.length > 0) {
     return {
-      content: content.map((c: any) => ({
+      content: content.map((c: unknown) => ({
         type: "content" as const,
-        content: toAcpContentBlock(c, isError),
+        content: toAcpContentBlock(c as ToolResultContent, isError),
       })),
     };
   } else if (typeof content === "object" && content !== null && "type" in content) {
@@ -625,7 +632,7 @@ function toAcpContentUpdate(
       content: [
         {
           type: "content" as const,
-          content: toAcpContentBlock(content, isError),
+          content: toAcpContentBlock(content as ToolResultContent, isError),
         },
       ],
     };
@@ -932,7 +939,7 @@ export const createPostToolUseHook =
       onEnterPlanMode?: () => Promise<void>;
     },
   ): HookCallback =>
-  async (input: any, toolUseID: string | undefined): Promise<{ continue: boolean }> => {
+  async (input, toolUseID: string | undefined): Promise<{ continue: boolean }> => {
     if (input.hook_event_name === "PostToolUse") {
       // Handle EnterPlanMode tool - notify client of mode change after successful execution
       if (input.tool_name === "EnterPlanMode" && options?.onEnterPlanMode) {
