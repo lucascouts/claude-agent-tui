@@ -458,3 +458,56 @@ export async function restore(backup: Backup): Promise<RestoreResult> {
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Story 060 (R2.2 / R2.3 / R3.2) — toggle the ultracode keys in the per-session SCRATCH settings file.
+//
+// The "ultracode" effort-selector sentinel (story 060) activates the binary's Workflow keyword-trigger.
+// Its LIVE activation is a keyword prefix on the outgoing prompt (acp-agent.ts); THIS function is the
+// declarative spawn-time complement — the keys `claude` reads only at (re-)spawn, so the scratch stays
+// in sync for any (re-)spawn that DOES happen. It is NOT itself a re-spawn trigger (Option A).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The two settings keys that opt a session into the ultracode keyword-trigger (story 060). */
+const ULTRACODE_SETTINGS_KEY = "ultracode";
+const ULTRACODE_KEYWORD_TRIGGER_KEY = "ultracodeKeywordTrigger";
+
+/**
+ * Story 060 (R2.2/R2.3/R3.2) — toggle the ultracode keys in the per-session SCRATCH settings file the
+ * gate wrote (preserving the hook + EVERY other key). `active` → set `ultracode:true` (the per-session
+ * ACTIVATOR) + `ultracodeKeywordTrigger:true` (defensively ENABLE the keyword even if the user disabled
+ * it). `!active` → remove BOTH keys. Read tolerantly (JSONC) + written durably (temp+fsync+rename),
+ * mirroring {@link injectHook}. A missing/empty file is treated as an empty object. No-op-safe and
+ * idempotent: re-applying the same `active` produces a byte-equivalent document.
+ *
+ * @param settingsPath absolute path to the per-session scratch `settings.local.json` (the gate's file).
+ * @param active whether ultracode is selected (set the keys) or de-selected (remove them).
+ * @throws {Error} only on a genuine read/parse/write failure — NEVER on the benign absence of the file
+ *   (ENOENT → treated as `{}`), mirroring the rest of the module's discipline.
+ */
+export async function applyUltracodeSettings(settingsPath: string, active: boolean): Promise<void> {
+  // 1) Read the current bytes; a missing file (ENOENT) is treated as "no prior settings" (→ `{}`).
+  const priorBytes = await readPriorBytes(settingsPath);
+  let current: SettingsLike = {};
+  if (priorBytes !== null) {
+    const text = priorBytes.toString("utf8").trim();
+    // An empty existing file is treated as an empty object rather than a parse error (mirrors inject).
+    if (text.length > 0) {
+      current = parsePriorSettings(text);
+    }
+  }
+
+  // 2) Clone (never mutate the parsed prior) and toggle ONLY the two ultracode keys — every other key
+  //    (the gate hook, the user's own config) is preserved verbatim.
+  const next = structuredClone(current) as SettingsLike;
+  if (active) {
+    next[ULTRACODE_SETTINGS_KEY] = true;
+    next[ULTRACODE_KEYWORD_TRIGGER_KEY] = true;
+  } else {
+    delete next[ULTRACODE_SETTINGS_KEY];
+    delete next[ULTRACODE_KEYWORD_TRIGGER_KEY];
+  }
+
+  // 3) Durably write (temp+fsync+rename) so a concurrent (re-)spawn read never sees a half-written file.
+  await durableWrite(settingsPath, `${JSON.stringify(next, null, 2)}\n`);
+}

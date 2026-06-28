@@ -113,7 +113,17 @@ import { usageUpdatesFor, type UsageCarrier } from "./usage.js";
 import { createTurnResolver } from "./end-of-turn.js";
 import type { DetectorSchedule, EndOfTurnDetector } from "./end-of-turn.js";
 import { sendPrompt } from "./engine-pty.js";
-import { MODEL_CATALOG, DEFAULT_MODEL_INFO } from "./model-catalog.js";
+import {
+  MODEL_CATALOG,
+  DEFAULT_MODEL_INFO,
+  ULTRACODE_EFFORT,
+  ULTRACODE_EFFORT_LEVEL,
+  ULTRACODE_EFFORT_LABEL,
+} from "./model-catalog.js";
+// Story 060 (R2.2/R2.3/R3.2) — the declarative spawn-time complement to the live ultracode keyword:
+// toggle the {ultracode,ultracodeKeywordTrigger} keys in the gate's per-session scratch settings file
+// (preserving the hook + every other key). Lives in the gate's settings-writer so it reuses durableWrite.
+import { applyUltracodeSettings } from "./gate/settings-writer.js";
 import { discoverAgents, type AgentCatalogEntry } from "./agent-catalog.js";
 import { setupSessionGate } from "./permissions/gate-wiring.js";
 import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gate-wiring.js";
@@ -285,6 +295,13 @@ type Session = {
    * {@link pendingModelInjection}). Undefined when nothing is queued.
    */
   pendingEffortInjection?: string;
+  /**
+   * Story 060 (R2.1/R2.2) — true WHILE the "ultracode" effort-selector sentinel is selected for this
+   * session. The LIVE activation it drives is a keyword prefix on the OUTGOING prompt (the binary's
+   * documented per-turn Workflow opt-in) — Option A, no re-spawn. Cleared when a real effort level (or
+   * `default`) is re-selected. The declarative spawn-time complement is {@link applyUltracodeSettings}.
+   */
+  ultracodeActive?: boolean;
   /**
    * Story 046 (R3.8) — true WHILE an in-place re-spawn (R3.4 dontAsk/bypass switch) is between the old
    * PTY teardown and the new PTY being ready. Selector changes arriving in this window are rejected
@@ -1558,6 +1575,12 @@ export class ClaudeAcpAgent implements Agent {
     sessionRecord.turnTempImagePaths = turnTempImagePaths;
     const payload = promptToClaude(params, this.logger, turnTempImagePaths);
 
+    // Story 060 (R2.2) — while ultracode is active, prefix the OUTGOING prompt with the `ultracode`
+    // keyword (the binary's per-turn Workflow opt-in). This is the LIVE activation that needs no
+    // re-spawn (Option A) and works pre- AND post-first-interaction; the scratch settings keys are the
+    // declarative spawn-time complement. NEVER emitted as a `/effort` value (R1.2).
+    const outgoing = sessionRecord.ultracodeActive ? `${ULTRACODE_EFFORT} ${payload}` : payload;
+
     // (2) Register the turn with the story-024 resolver: the detector that the live pump feeds, and
     // the awaitable that settles ONCE with { stopReason: mapStopReason(...) } on the terminal
     // boundary (or rejects on the watchdog). One shared `schedule` drives sendPrompt + the resolver.
@@ -1578,7 +1601,7 @@ export class ClaudeAcpAgent implements Agent {
     // On a PTY-write failure, reject the pending prompt via the throw — markCancelled clears the
     // detector's Δt + watchdog timers so nothing is left hung — rather than swallowing the error.
     try {
-      sendPrompt(sessionRecord.pty, payload, this.schedule);
+      sendPrompt(sessionRecord.pty, outgoing, this.schedule);
     } catch (e) {
       detector.markCancelled();
       sessionRecord.turnDetector = undefined;
@@ -1846,7 +1869,9 @@ export class ClaudeAcpAgent implements Agent {
       // mirroring /model — no re-spawn, works before the first interaction. Mid-turn it defers; it never
       // throws, so applyConfigOptionValue below always commits the new currentValue (optimistic, like
       // /model). The flag path stays only to seed/preserve effort across mode/agent re-spawns.
-      this.applyEffortChange(session, resolvedValue);
+      // Story 060 (R2/R3.2): route through applyEffortSelection so the `ultracode` sentinel is
+      // special-cased (activate keyword + scratch keys + /effort xhigh) while real levels deselect it.
+      await this.applyEffortSelection(session, resolvedValue);
     } else if (params.configId === "agent") {
       // Story 056 (R3.3/R3.4): the agent persona has no live mid-session path either — apply it by an
       // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
@@ -2148,6 +2173,54 @@ export class ClaudeAcpAgent implements Agent {
   private currentAgent(session: Session): string | undefined {
     const opt = session.configOptions.find((o) => o.id === "agent");
     return typeof opt?.currentValue === "string" ? opt.currentValue : undefined;
+  }
+
+  /**
+   * Story 060 (R2/R3.2) — apply an effort-selector choice, special-casing the `ultracode` sentinel.
+   *
+   * Selecting `ultracode` (Option A — keyword + scratch, NO re-spawn): activate the session flag (which
+   * makes {@link prompt} prefix the OUTGOING prompt with the `ultracode` keyword — the binary's per-turn
+   * Workflow opt-in, the effective live mechanism), write the scratch ultracode keys via
+   * {@link applyUltracodeSettings} (the declarative spawn-time complement), and set the effort to xhigh
+   * through the SAME live `/effort` inject as every other level — NEVER `/effort ultracode` (R1.2). The
+   * `already` guard suppresses a redundant `/effort xhigh` re-inject when ultracode is re-selected while
+   * already active.
+   *
+   * Selecting a real level (or `default`) DEACTIVATES ultracode: clear the flag, remove the scratch keys,
+   * then apply that level through {@link applyEffortChange} (whose own no-op guard handles a same-level
+   * pick). `applyConfigOptionValue` (the caller, after this returns) commits the selector's currentValue,
+   * which for `ultracode` correctly stays `"ultracode"` (the {@link buildConfigOptions} `includes` guard
+   * keeps it valid across rebuilds).
+   */
+  private async applyEffortSelection(session: Session, value: string): Promise<void> {
+    if (value === ULTRACODE_EFFORT) {
+      const already = session.ultracodeActive === true;
+      session.ultracodeActive = true;
+      // The gate's per-session SCRATCH settings file is the spawn's `--settings` target; on a live
+      // Session it is reachable via `session.gate?.settingsPath` (the value createSession also threads
+      // into StartEngineArgs.settingsFile). Absent on a no-gate / resume / replay session → keyword-only.
+      const scratchPath = session.gate?.settingsPath;
+      if (scratchPath) {
+        // Declarative scratch keys for any future (re-)spawn (NOT a re-spawn trigger — Option A).
+        await applyUltracodeSettings(scratchPath, true);
+      }
+      // Effort component is xhigh, applied via the live /effort inject — but only when not already active
+      // (re-selecting ultracode must not re-inject `/effort xhigh`). applyEffortChange's own no-op guard
+      // also short-circuits if xhigh already equals the current effort.
+      if (!already) {
+        this.applyEffortChange(session, ULTRACODE_EFFORT_LEVEL);
+      }
+      return;
+    }
+    // A real level (or `default`) was chosen → deactivate ultracode before applying it.
+    if (session.ultracodeActive) {
+      session.ultracodeActive = false;
+      const scratchPath = session.gate?.settingsPath;
+      if (scratchPath) {
+        await applyUltracodeSettings(scratchPath, false);
+      }
+    }
+    this.applyEffortChange(session, value);
   }
 
   /**
@@ -3233,9 +3306,15 @@ function buildConfigOptions(
           .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
           .join(" "),
       })),
+      // Story 060 (R1.1) — the "ultracode" sentinel, LAST and after the five real levels. NOT a real
+      // `--effort` value (claude rejects `--effort ultracode`); it maps to xhigh + orchestration (Task 3).
+      { value: ULTRACODE_EFFORT, name: ULTRACODE_EFFORT_LABEL },
     ];
 
-    const includes = (l: string) => l === "default" || (supportedLevels as string[]).includes(l);
+    // `ultracode` is a valid current value so a configOptions rebuild (e.g. after a re-spawn) does not
+    // reset a selected ultracode back to "default". It stays OUT of supportedLevels (real --effort enum).
+    const includes = (l: string) =>
+      l === "default" || l === ULTRACODE_EFFORT || (supportedLevels as string[]).includes(l);
     const validEffort =
       currentEffortLevel && includes(currentEffortLevel) ? currentEffortLevel : "default";
 

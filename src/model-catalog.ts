@@ -14,14 +14,32 @@
 // `@anthropic-ai/claude-agent-sdk` (the same type `acp-agent.ts` builds its model list from).
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
 
-/** Effort levels offered for reasoning-capable models — the SDK's `supportedEffortLevels` vocabulary. */
-const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLevels"]> = [
+/**
+ * Effort levels offered for reasoning-capable models — the SDK's `supportedEffortLevels` vocabulary.
+ * Story 060: exported so the ultracode guard test can assert membership stays the five real levels
+ * (it must NEVER contain {@link ULTRACODE_EFFORT}; the real `--effort` enum is exactly this set).
+ */
+export const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLevels"]> = [
   "low",
   "medium",
   "high",
   "xhigh",
   "max",
 ];
+
+/**
+ * Story 060 — the "ultracode" pseudo-level sentinel for the effort selector. NOT a real `--effort`
+ * value (claude 2.1.195 rejects `--effort ultracode`; the enum stays {@link REASONING_EFFORT_LEVELS}).
+ * Selecting it maps to `--effort xhigh` PLUS activating the ultracode keyword-trigger for the session
+ * (story 060 Task 3). Kept OUT of REASONING_EFFORT_LEVELS so no real-effort code path ever emits it.
+ */
+export const ULTRACODE_EFFORT = "ultracode";
+
+/** The real effort level the ultracode pseudo-level maps to (its documented effort component). */
+export const ULTRACODE_EFFORT_LEVEL = "xhigh";
+
+/** Selector label — makes clear it is xhigh + orchestration, NOT a duplicate of the plain `xhigh` entry. */
+export const ULTRACODE_EFFORT_LABEL = "ultracode (xhigh + orchestration)";
 
 /**
  * The static curated catalog advertised to the Zed Agent Panel's `model` selector. Each `value` is a
