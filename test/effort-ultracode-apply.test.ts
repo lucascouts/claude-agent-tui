@@ -71,12 +71,33 @@ function makeClock() {
 }
 
 /** startEngine seam: call 1 is the createSession spawn. Selecting effort/ultracode must NOT re-spawn
- *  (Option A), so any 2nd call is a regression. All PTYs share one `writes` array (injects observable). */
+ *  (Option A), so any 2nd call is a regression. All PTYs share one `writes` array (injects observable).
+ *  `effortLevel`/`agent`/`permissionMode` are captured so a re-spawn's flag values are assertable (the
+ *  R1.2 re-spawn-while-active guard checks the sentinel never reaches `--effort`). */
 function makeStartEngine() {
-  const calls: Array<{ sessionId?: string; resume?: boolean }> = [];
+  const calls: Array<{
+    sessionId?: string;
+    resume?: boolean;
+    effortLevel?: string;
+    agent?: string;
+    permissionMode?: string;
+  }> = [];
   const writes: string[] = [];
-  const startEngine = (args: { sessionId?: string; cwd: string; resume?: boolean }) => {
-    calls.push({ sessionId: args.sessionId, resume: args.resume });
+  const startEngine = (args: {
+    sessionId?: string;
+    cwd: string;
+    resume?: boolean;
+    effortLevel?: string;
+    agent?: string;
+    permissionMode?: string;
+  }) => {
+    calls.push({
+      sessionId: args.sessionId,
+      resume: args.resume,
+      effortLevel: args.effortLevel,
+      agent: args.agent,
+      permissionMode: args.permissionMode,
+    });
     return {
       sessionId: args.sessionId ?? "11111111-1111-4111-8111-111111111111",
       pty: makeFakePty(writes),
@@ -297,6 +318,55 @@ test("R2.3 — selecting a real level after ultracode injects that level, clears
   assert.ok(
     !body.startsWith("ultracode "),
     `after deselecting ultracode the outgoing payload must NOT be keyword-prefixed; got: ${JSON.stringify(body)}`,
+  );
+});
+
+test("R1.2 (re-spawn-while-active) — an agent/mode re-spawn while ultracode is active passes `--effort xhigh` to the spawn, NEVER the `ultracode` sentinel", async (t) => {
+  const fake = makeStartEngine();
+  const clock = makeClock();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, clock.schedule);
+  await setOption(agent, sessionId, "model", "sonnet"); // surface the effort option
+  await setOption(agent, sessionId, "effort", "ultracode"); // activate → currentValue stays the sentinel
+  assert.equal(sessions[sessionId].ultracodeActive, true, "precondition: ultracode active");
+  assert.equal(
+    effortCurrentValue(sessions, sessionId),
+    "ultracode",
+    "precondition: the effort configOption currentValue is the `ultracode` sentinel (optimistic commit)",
+  );
+  const callsBefore = fake.calls.length;
+
+  // applyAgentChange (and the dontAsk/bypass driveModeIntoTui path) re-spawn WITHOUT threading
+  // change.effortLevel, so respawnSession preserves the current effort via currentEffort(session) — which
+  // is the `ultracode` SENTINEL while active. The seam MUST map it to its real effort component (xhigh):
+  // the binary rejects `--effort ultracode` (story-060 probe → "Unknown --effort value 'ultracode'"),
+  // silently degrading effort to default. The scratch `ultracode:true` already carries the orchestration
+  // activation at spawn, so xhigh is the correct flag value. Driving respawnSession({agent}) directly
+  // models exactly what applyAgentChange does after its no-op guard.
+  await (
+    agent as unknown as {
+      respawnSession: (
+        sid: string,
+        session: unknown,
+        change: { agent?: string; permissionMode?: string; effortLevel?: string },
+      ) => Promise<void>;
+    }
+  ).respawnSession(sessionId, sessions[sessionId], { agent: "code-reviewer" });
+
+  const respawn = fake.calls[fake.calls.length - 1];
+  assert.equal(
+    fake.calls.length,
+    callsBefore + 1,
+    "the agent change triggers exactly one re-spawn (a new startEngine call)",
+  );
+  assert.equal(respawn.agent, "code-reviewer", "the re-spawn carries the new agent persona");
+  assert.ok(
+    respawn.effortLevel !== "ultracode",
+    `R1.2: the spawn must NEVER receive the ultracode sentinel as --effort (the binary rejects it); got: ${JSON.stringify(respawn.effortLevel)}`,
+  );
+  assert.equal(
+    respawn.effortLevel,
+    "xhigh",
+    "the preserved ultracode effort maps to its real component (xhigh) at the spawn seam",
   );
 });
 

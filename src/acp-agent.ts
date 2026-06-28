@@ -2105,7 +2105,15 @@ export class ClaudeAcpAgent implements Agent {
       // does not reset the others — the argv carries all three flags. There are three selectors now
       // (Story 056 added agent): a mode re-spawn keeps effort+agent, an agent re-spawn keeps mode+effort.
       const permissionMode = change.permissionMode ?? session.modes.currentModeId;
-      const effortLevel = change.effortLevel ?? this.currentEffort(session);
+      // Story 060 (R1.2 fix): the preserved currentEffort can be the `ultracode` SENTINEL (it is the
+      // committed configOption value while active). It is NOT a real `--effort` enum value — the binary
+      // rejects `--effort ultracode` (story-060 probe), so a mode/agent re-spawn-while-active would
+      // silently degrade effort to default. Map the sentinel to its real component (xhigh) at THIS spawn
+      // seam (it feeds BOTH buildClaudeCmd and buildResumeArgv); the scratch `ultracode:true` already
+      // carries the orchestration activation declaratively at spawn.
+      const preservedEffort = change.effortLevel ?? this.currentEffort(session);
+      const effortLevel =
+        preservedEffort === ULTRACODE_EFFORT ? ULTRACODE_EFFORT_LEVEL : preservedEffort;
       const agent = change.agent ?? this.currentAgent(session);
       // Story 057 (R2.4): REGENERATE the MCP scratch so the re-spawned `claude` reads the CURRENT MCP
       // config at startup (its `--mcp-config` is bound only at spawn). Re-translate from the stored raw
