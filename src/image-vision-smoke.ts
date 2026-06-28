@@ -95,7 +95,7 @@ const SEMVER_RE = /^(\d+\.\d+\.\d+)/;
  * its argument.
  */
 export function imageVisionSmoke(version: string | null | undefined): VisionSmokeResult {
-  const parsed = version != null ? SEMVER_RE.exec(version) : null;
+  const parsed = typeof version === "string" ? SEMVER_RE.exec(version) : null;
   if (parsed && versionGte(parsed[1], VISION_CONFIRMED_CLAUDE_VERSION)) {
     return {
       confirmed: true,

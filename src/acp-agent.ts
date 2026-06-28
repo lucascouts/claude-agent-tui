@@ -1553,8 +1553,10 @@ export class ClaudeAcpAgent implements Agent {
     // on the session BEFORE the prompt is sent — so the turn-settle + teardown cleanups can unlink it
     // and leave no orphan temp image.
     const turnTempImagePaths: string[] = [];
-    const payload = promptToClaude(params, this.logger, turnTempImagePaths);
+    // Bind the sink to the session BEFORE calling promptToClaude (same array by reference): even if a
+    // future promptToClaude were to throw mid-materialize, the teardown cleanup still reaches the paths.
     sessionRecord.turnTempImagePaths = turnTempImagePaths;
+    const payload = promptToClaude(params, this.logger, turnTempImagePaths);
 
     // (2) Register the turn with the story-024 resolver: the detector that the live pump feeds, and
     // the awaitable that settles ONCE with { stopReason: mapStopReason(...) } on the terminal
