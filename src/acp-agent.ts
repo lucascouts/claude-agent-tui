@@ -122,6 +122,7 @@ import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gat
 // lifecycle: written BEFORE spawn, threaded as a flag, removed on failure + teardown — with the added
 // re-spawn regeneration (R2.4). The module never logs the scratch contents/path-with-secrets (R2.3).
 import { translateMcpServers, writeMcpScratch, removeMcpScratch } from "./mcp-config-writer.js";
+import { materializeImage, cleanupMaterializedImages } from "./image-input.js";
 
 export const CLAUDE_CONFIG_DIR =
   process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
@@ -321,6 +322,13 @@ type Session = {
    * sourced fresh inside `emitLinearizedWithNested`; the main chain is whatever the last pump saw.
    */
   lastMessages?: SessionMessage[];
+  /**
+   * Story 058 (R2.1/R2.2) — the temp image files materialized for the in-flight turn (pushed by
+   * {@link promptToClaude}'s sink when the prompt is assembled, BEFORE it is sent), unlinked at turn
+   * settle (prompt()'s catch + finally, covering resolve AND cancel) via {@link cleanupMaterializedImages}
+   * and again on teardown as an idempotent backstop. Undefined when the turn materialized no image.
+   */
+  turnTempImagePaths?: string[];
 };
 
 // === SEAM(023) Group 1: the createSession injection seam ======================================
@@ -1541,7 +1549,12 @@ export class ClaudeAcpAgent implements Agent {
     // reachable by the live pump and the cancel path) the instant the turn begins.
 
     // (1) Assemble the PTY text payload from the ContentBlock[] (Task 1 rewrote this to return text).
-    const payload = promptToClaude(params, this.logger);
+    // Story 058 (R2.1/R2.2): pass a fresh sink so every image promptToClaude materializes is recorded
+    // on the session BEFORE the prompt is sent — so the turn-settle + teardown cleanups can unlink it
+    // and leave no orphan temp image.
+    const turnTempImagePaths: string[] = [];
+    const payload = promptToClaude(params, this.logger, turnTempImagePaths);
+    sessionRecord.turnTempImagePaths = turnTempImagePaths;
 
     // (2) Register the turn with the story-024 resolver: the detector that the live pump feeds, and
     // the awaitable that settles ONCE with { stopReason: mapStopReason(...) } on the terminal
@@ -1568,6 +1581,9 @@ export class ClaudeAcpAgent implements Agent {
       detector.markCancelled();
       sessionRecord.turnDetector = undefined;
       sessionRecord.turnCancel = undefined;
+      // Story 058 (R2.1): the turn never reached the model — drop its materialized temp images now.
+      cleanupMaterializedImages(sessionRecord.turnTempImagePaths);
+      sessionRecord.turnTempImagePaths = undefined;
       throw e;
     }
 
@@ -1578,6 +1594,10 @@ export class ClaudeAcpAgent implements Agent {
     } finally {
       sessionRecord.turnDetector = undefined;
       sessionRecord.turnCancel = undefined;
+      // Story 058 (R2.1/R2.2): the turn is over — resolved OR cancelled (both settle this same
+      // promise, per the comment below) — so unlink the temp images materialized for it. No orphans.
+      cleanupMaterializedImages(sessionRecord.turnTempImagePaths);
+      sessionRecord.turnTempImagePaths = undefined;
       // Story 044 (R2.3): the turn is over — resolved OR cancelled, both settle this same promise —
       // so the in-turn sub-agent watcher dies with it (covers turn-resolve AND markCancelled paths).
       sessionRecord.subagentWatcher?.stop();
@@ -1662,6 +1682,12 @@ export class ClaudeAcpAgent implements Agent {
       return;
     }
     await this.cancel({ sessionId });
+    // Story 058 (R2.1): idempotent backstop — unlink any temp images that survived a turn whose
+    // prompt-finally never ran (e.g. a session torn down between turns or before the finally fired).
+    // The cancel above may have already cleared them; cleanupMaterializedImages never throws on a
+    // gone file, so a double-cleanup is a safe no-op.
+    cleanupMaterializedImages(session.turnTempImagePaths);
+    session.turnTempImagePaths = undefined;
     // Story 044 (R2.3): stop the sub-agent watcher on teardown — idempotent with the prompt-finally stop.
     session.subagentWatcher?.stop();
     session.subagentWatcher = undefined;
@@ -3385,14 +3411,31 @@ function filePathFromUri(uri: string): string | null {
  *                     anything below the threshold — or large but path-less — is
  *                     inlined directly so the context is not lost.
  *
- * `resource` (blob) / `image` / `audio` blocks are SILENT no-ops here (R4.1): they
- * emit no PTY bytes and are NOT logged — they are expected-but-unsupported media in
- * v1, not errors. An UNKNOWN block `type` (the `default` branch) and any block whose
- * mapping THROWS are treated as malformed: skipped, recorded via the `logger`, and the
- * remaining valid blocks still map — one bad block never aborts the whole prompt (R1.3).
+ *   - image → materialize the base64 to a uuid-named temp file (extension from mimeType)
+ *             and emit `@<temp-path>` (Story 058 / R1.1). Once at least one image is
+ *             materialized, a single Read-inducing directive is appended after the loop so
+ *             the TUI's Read tool fires and vision-encodes it (R1.2). Each temp path is
+ *             pushed into `materializedSink` (when provided) so the caller can clean it up.
+ *
+ * `resource` (blob) / `audio` blocks are SILENT no-ops here (R4.1): they emit no PTY bytes
+ * and are NOT logged — they are expected-but-unsupported media in v1, not errors. An UNKNOWN
+ * block `type` (the `default` branch) and any block whose mapping THROWS are treated as
+ * malformed: skipped, recorded via the `logger`, and the remaining valid blocks still map —
+ * one bad block never aborts the whole prompt (R1.3). A `materializeImage` failure is caught
+ * by that same per-block isolation, so a broken image is skipped, never aborting the prompt.
+ *
+ * `materializedSink`, when passed, receives every materialized temp path (in order) so the
+ * caller owns their lifecycle (cleanup is a later task). The return type stays `string`.
  */
-export function promptToClaude(prompt: PromptRequest, logger: Logger = console): string {
+export function promptToClaude(
+  prompt: PromptRequest,
+  logger: Logger = console,
+  materializedSink?: string[],
+): string {
   const fragments: string[] = [];
+  // Set once any image block is materialized, so exactly ONE Read-inducing directive is
+  // appended after the loop regardless of how many images the prompt carries (R1.2).
+  let materializedAnyImage = false;
 
   for (const chunk of prompt.prompt) {
     // R1.3: isolate every block. A malformed block — even one whose `type` getter
@@ -3441,9 +3484,25 @@ export function promptToClaude(prompt: PromptRequest, logger: Logger = console):
           }
           break;
         }
-        // image / audio → SILENT no-ops (R4.1): expected-but-unsupported media in v1.
-        // They emit no PTY bytes and are NOT logged (they are not errors).
-        case "image":
+        case "image": {
+          // R1.1: an ACP image carries base64 `data` + `mimeType` (NOT `source`/`media_type`).
+          // Materialize it to a uuid-named temp file and reference it with `@<path>` so the TUI
+          // re-reads (and vision-encodes) it — mirroring the `resource_link` @<path> idiom. A
+          // single Read-inducing directive is appended AFTER the loop (R1.2). If materialize
+          // throws, the surrounding per-block try/catch isolates it (R1.3): this image is skipped.
+          //
+          // R1.3 (shell-safety): the path is uuid-named + fork-controlled and the prompt body reaches
+          // the PTY via bracketed-paste (engine-pty `sendPrompt` → `p.write`), NOT the `bash -lc` spawn
+          // string — so no shell ever parses `@<path>` and the prompt has no injection surface. extFor
+          // maps mimeType to a CLOSED extension set, so a hostile mimeType cannot reach the filename.
+          const tempPath = materializeImage(chunk.data, chunk.mimeType);
+          materializedSink?.push(tempPath);
+          fragments.push(`@${tempPath}`);
+          materializedAnyImage = true;
+          break;
+        }
+        // audio → SILENT no-op (R4.1): expected-but-unsupported media in v1. It emits no PTY
+        // bytes and is NOT logged (it is not an error).
         case "audio":
           break;
         default:
@@ -3461,6 +3520,12 @@ export function promptToClaude(prompt: PromptRequest, logger: Logger = console):
       logger.error("promptToClaude: skipped a malformed content block", err);
       continue;
     }
+  }
+
+  // R1.2: exactly one Read-inducing directive per prompt when ≥1 image was materialized, so the
+  // TUI's Read tool fires on the @<path>(s) above and vision-encodes them (the proven 2.1.195 path).
+  if (materializedAnyImage) {
+    fragments.push("Read the attached image(s) above and use them to answer.");
   }
 
   return fragments.filter((fragment) => fragment.length > 0).join(" ");

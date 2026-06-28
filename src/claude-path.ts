@@ -26,6 +26,8 @@
 import { execFileSync } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
+// Story 058 R3.2 — version-aware image-vision smoke (observability only; NEVER gates image:true, R3.1).
+import { reportImageVisionSmoke } from "./image-vision-smoke.js";
 
 /**
  * Provenance pin the live `claude` version is measured against — kept in lockstep
@@ -150,6 +152,10 @@ export function resolveClaudePath(opts: ResolveOptions = {}): string {
           log(`[claude-path] resolved claude ${candidate} (version ${detected})`);
         }
         reportVersionDrift(detected, PROVENANCE_CLAUDE_VERSION, log);
+        // Story 058 R3.2 — version-aware @image vision smoke: warn ONCE (one-liner) when this claude
+        // is NOT a version confirmed to vision-encode @image via Read. Observability only — it never
+        // blocks and never touches promptCapabilities.image (stays `image: true`, R3.1).
+        reportImageVisionSmoke(detected, log);
       } catch {
         // Observability is best-effort; never let it break resolution.
       }
