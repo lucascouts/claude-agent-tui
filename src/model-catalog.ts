@@ -26,24 +26,28 @@ const REASONING_EFFORT_LEVELS: NonNullable<ModelInfo["supportedEffortLevels"]> =
 /**
  * The static curated catalog advertised to the Zed Agent Panel's `model` selector. Each `value` is a
  * `claude` TUI alias accepted by `/model <alias>` (live) and `--model <alias>` (spawn). `default` is
- * first and is the safe fallback. Effort-capable models (`default`, `sonnet`, `opus`) carry the
- * metadata that surfaces the effort selector; `haiku`/`opusplan` advertise no effort levels.
+ * first and is the safe fallback.
+ *
+ * ORDER + membership mirror the ORIGINAL's `/model` picker, LIVE-VERIFIED against 2.1.195 (PTY probe):
+ * `Default (recommended)`, `Opus`, `Sonnet`, `Sonnet (1M context)`, `Haiku`. The original gets this
+ * from the SDK `supportedModels()` the fork cut, so we curate it statically. The 1M alias is literally
+ * `sonnet[1m]` (`/model sonnet[1m]` accepted; `sonnet-1m` → "not found"). `opusplan` is a fork-only
+ * EXTRA (a real `claude` plan-mode preset the original does not list) kept as the trailing entry.
+ *
+ * Effort-capable models (`default`/`opus`/`sonnet`/`sonnet[1m]`) carry `supportsEffort` +
+ * `supportedEffortLevels`; `haiku`/`opusplan` advertise none. `supportsAutoMode: true` on the same four
+ * surfaces the `auto` permission mode (a model classifier) — the original drops `auto` on `haiku`
+ * (the SDK signal `reconcileModeFromTranscript` clamps), so haiku/opusplan omit it.
  */
 export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "default",
-    displayName: "Default",
+    displayName: "Default (recommended)",
     description:
       "Use the model the claude TUI is configured with (safe fallback); supports reasoning effort.",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
-  },
-  {
-    value: "sonnet",
-    displayName: "Sonnet",
-    description: "Claude Sonnet — balanced speed and capability; supports reasoning effort.",
-    supportsEffort: true,
-    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
   },
   {
     value: "opus",
@@ -51,6 +55,24 @@ export const MODEL_CATALOG: ModelInfo[] = [
     description: "Claude Opus — highest capability; supports reasoning effort.",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
+  },
+  {
+    value: "sonnet",
+    displayName: "Sonnet",
+    description: "Claude Sonnet — balanced speed and capability; supports reasoning effort.",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
+  },
+  {
+    value: "sonnet[1m]",
+    displayName: "Sonnet (1M context)",
+    description:
+      "Claude Sonnet with a 1M-token context window; draws from usage credits; supports reasoning effort.",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
   },
   {
     value: "haiku",
@@ -60,7 +82,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "opusplan",
     displayName: "Opus Plan",
-    description: "Opus while planning, Sonnet for execution (plan-mode workflow).",
+    description: "Opus while planning, Sonnet for execution (plan-mode workflow; fork extra).",
   },
 ];
 

@@ -79,6 +79,19 @@ test("4.5 a cyclable mode (acceptEdits) description carries NO restart warning (
   );
 });
 
+test("R7 (056 v3) the `auto` permission mode IS advertised on the default model, with the classifier tip", async (t) => {
+  // The default model now declares supportsAutoMode (model-catalog.ts), so buildAvailableModes surfaces
+  // `auto` — the parity gap the in-Zed proof found (the mode existed but was never advertised).
+  const opts = await modeOptions(t);
+  const auto = opts.find((o) => o.value === "auto");
+  assert.ok(auto, "auto must be advertised on the default model (supportsAutoMode === true)");
+  assert.match(
+    auto!.description ?? "",
+    /classifier/i,
+    `auto must carry the model-classifier tip, got: ${JSON.stringify(auto!.description)}`,
+  );
+});
+
 test("4.6 bypassPermissions is omitted from advertised modes when unavailable under the guard (R3.6)", async (t) => {
   const opts = await modeOptions(t);
   const bypass = opts.find((o) => o.value === "bypassPermissions");

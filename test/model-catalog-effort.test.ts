@@ -40,6 +40,31 @@ test("2.1 DEFAULT_MODEL_INFO advertises the full parity level set incl. xhigh + 
   );
 });
 
+// ---- catalog parity (056 v3 / R7) — order + membership mirror the original's /model picker --------
+
+test("R7 (056 v3) MODEL_CATALOG order + membership mirror the original picker (+ opusplan extra)", () => {
+  // LIVE-VERIFIED (PTY probe, 2.1.195): Default(recommended), Opus, Sonnet, Sonnet (1M context), Haiku.
+  // opusplan is the fork-only trailing extra.
+  assert.deepEqual(
+    MODEL_CATALOG.map((m) => m.value),
+    ["default", "opus", "sonnet", "sonnet[1m]", "haiku", "opusplan"],
+    "catalog order must mirror the original (Default/Opus/Sonnet/Sonnet 1M/Haiku) with opusplan trailing",
+  );
+  const byVal = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!;
+  assert.equal(byVal("default").displayName, "Default (recommended)", "default label carries (recommended)");
+  assert.equal(byVal("sonnet[1m]").displayName, "Sonnet (1M context)", "the 1M alias is literally sonnet[1m]");
+});
+
+test("R7 (056 v3) supportsAutoMode set on default/opus/sonnet/sonnet[1m], NOT haiku/opusplan", () => {
+  const auto = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!.supportsAutoMode === true;
+  for (const v of ["default", "opus", "sonnet", "sonnet[1m]"]) {
+    assert.ok(auto(v), `${v} must declare supportsAutoMode (surfaces the auto permission mode)`);
+  }
+  for (const v of ["haiku", "opusplan"]) {
+    assert.ok(!auto(v), `${v} must NOT declare supportsAutoMode (auto dropped — parity with the original)`);
+  }
+});
+
 // ---- the surface via the agent (effort-surface / effort-apply precedents) -------------------------
 
 function makeFakePty() {
