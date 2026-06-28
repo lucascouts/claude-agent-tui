@@ -25,6 +25,7 @@ import pty from "node-pty";
 import type { IDisposable } from "node-pty";
 import {
   assertSpawnEnvUntainted,
+  buildAddDirFlags,
   buildSanitizedEnv,
   resolveShell,
   spawnClaudePty,
@@ -279,12 +280,26 @@ const RESUME_PTY_NAME = "xterm-256color";
  * the SECOND layer of the command-injection defense — re-asserted via {@link isSafeAgentRef} (which
  * accepts a namespaced `plugin:name`) so an unsafe name is DROPPED (no flag), never interpolated.
  * Still no `-p`/`--print`/`stream-json`.
+ *
+ * Story 057 (R1.1/R1.2): an optional `additionalDirectories` list is folded into the SAME `flags`
+ * string as ONE double-quoted `--add-dir "<dir>"` per dir — so, like the agent flag, a single addition
+ * reaches BOTH the `--resume "<id>"` half AND the `|| claude` fallback half. Each dir is re-asserted via
+ * {@link isSafeDir} (absolute + existing + no shell metacharacter); an unsafe dir is DROPPED (logged),
+ * never interpolated. Still no `-p`/`--print`/`stream-json`.
+ *
+ * Story 057 (R2.2): an optional `mcpConfigFile` PATH is likewise folded into the SAME `flags` string as
+ * the DOUBLE-QUOTED `--mcp-config "<file>"` (a file path — the secret-bearing JSON stays off the command
+ * line), so this single addition reaches BOTH the `--resume "<id>"` launch AND the `|| claude` fresh
+ * fallback. R2.2 HARD rule: `--strict-mcp-config` is NEVER emitted, so a resumed turn keeps MERGING the
+ * scratch with the user's own `.mcp.json`/settings MCP servers. Still no `-p`/`--print`/`stream-json`.
  */
 export function buildResumeArgv(
   sessionId: string,
   permissionMode?: string,
   effortLevel?: string,
   agent?: string,
+  additionalDirectories?: string[],
+  mcpConfigFile?: string,
 ): [string, string] {
   const pm =
     permissionMode && permissionMode !== "default" ? ` --permission-mode ${permissionMode}` : "";
@@ -293,7 +308,18 @@ export function buildResumeArgv(
   // sentinel = no persona emits nothing, mirroring --effort) and only when it passes the R3.3
   // allowlist re-assert; folded into `flags` so it carries into both the --resume and || claude halves.
   const ag = agent && agent !== "default" && isSafeAgentRef(agent) ? ` --agent "${agent}"` : "";
-  const flags = `${pm}${ef}${ag}`;
+  // Story 057 (R1.1/R1.2): ONE double-quoted `--add-dir "<dir>"` per safe dir, built by the SAME shared
+  // {@link buildAddDirFlags} the fresh spawn path uses (single source of truth — isSafeDir: absolute +
+  // existing + no shell metachar; unsafe → dropped+logged). Folded into `flags` BELOW so the dirs carry
+  // into BOTH the --resume launch AND the || claude fresh fallback (same single-addition-reaches-both
+  // mechanism as the agent flag). Empty/undefined → "".
+  const dirs = buildAddDirFlags(additionalDirectories);
+  // Story 057 (R2.2): the double-quoted `--mcp-config "<file>"` fragment, emitted only when set; folded
+  // into `flags` BELOW so — like every other flag here — it reaches BOTH the --resume launch AND the
+  // || claude fresh fallback. NEVER `--strict-mcp-config` (R2.2): the resumed turn keeps MERGING the
+  // scratch with the user's own .mcp.json/settings MCP servers. A file path keeps the JSON off the CLI.
+  const mcp = mcpConfigFile ? ` --mcp-config "${mcpConfigFile}"` : "";
+  const flags = `${pm}${ef}${ag}${dirs}${mcp}`;
   return ["-c", `claude --resume "${sessionId}"${flags} || claude${flags}`];
 }
 
@@ -320,6 +346,21 @@ export interface SpawnResumeOptions {
    * allowlist so an unsafe name is dropped. Absent → no flag.
    */
   agent?: string;
+  /**
+   * Story 057 (R1.1/R1.2): carry ONE double-quoted `--add-dir "<dir>"` per dir into the resume argv —
+   * folded into the shared `flags`, so the dirs reach BOTH the `--resume` and the `|| claude` fallback
+   * branches. Injection-safe — each dir re-asserted via {@link isSafeDir} so an unsafe dir is dropped.
+   * INTERACTIVE-ONLY: adds no `-p`/`--print`/`stream-json`. Absent/empty → no flag.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Story 057 (R2.2): carry the DOUBLE-QUOTED `--mcp-config "<file>"` into the resume argv — folded into
+   * the shared `flags`, so the scratch-config path reaches BOTH the `--resume` and the `|| claude`
+   * fallback branches. NEVER paired with `--strict-mcp-config`, so the resumed turn keeps MERGING the
+   * scratch with the user's own `.mcp.json`/settings MCP servers (R2.2). A file path keeps the JSON off
+   * the command line. INTERACTIVE-ONLY: adds no `-p`/`--print`/`stream-json`. Absent → no flag.
+   */
+  mcpConfigFile?: string;
 }
 
 /**
@@ -334,7 +375,14 @@ export function spawnResumePty(opts: SpawnResumeOptions): PtyEngineHandle {
   const { sessionId, cwd, baseEnv = process.env, spawn = pty.spawn } = opts;
 
   const shell = resolveShell(baseEnv);
-  const argv = buildResumeArgv(sessionId, opts.permissionMode, opts.effortLevel, opts.agent);
+  const argv = buildResumeArgv(
+    sessionId,
+    opts.permissionMode,
+    opts.effortLevel,
+    opts.agent,
+    opts.additionalDirectories,
+    opts.mcpConfigFile,
+  );
   const env = buildSanitizedEnv(baseEnv);
 
   // §10 refuse-to-spawn guard (R4.2): abort if any forbidden billing var survived sanitization,
@@ -379,6 +427,19 @@ export interface CreateSessionEngineOptions {
    * Absent → no flag.
    */
   agent?: string;
+  /**
+   * Story 057 (R1.1/R1.2): forwarded to {@link spawnClaudePty} as ONE double-quoted `--add-dir "<dir>"`
+   * per safe dir for a fresh spawn. Injection-safe (each dir re-asserted via {@link isSafeDir}).
+   * INTERACTIVE-ONLY: adds no `-p`/`--print`/`stream-json`. Absent/empty → no flag.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Story 057 (R2.2): forwarded to {@link spawnClaudePty} as the DOUBLE-QUOTED `--mcp-config "<file>"`
+   * for a fresh spawn (the fork-controlled scratch path from `mcp-config-writer.ts`). NEVER paired with
+   * `--strict-mcp-config`, so claude MERGES the scratch with the user's own `.mcp.json`/settings MCP
+   * servers (R2.2). INTERACTIVE-ONLY: adds no `-p`/`--print`/`stream-json`. Absent → no flag.
+   */
+  mcpConfigFile?: string;
   /**
    * Story 034 (§9 hybrid gate): per-session SCRATCH settings file carrying the fork's
    * `PreToolUse` hook, forwarded to {@link spawnClaudePty} as `--settings "<file>"`. The
@@ -438,6 +499,8 @@ export function createSessionEngine(opts: CreateSessionEngineOptions): SessionEn
     effortLevel: opts.effortLevel,
     agent: opts.agent,
     settingsFile: opts.settingsFile,
+    additionalDirectories: opts.additionalDirectories,
+    mcpConfigFile: opts.mcpConfigFile,
   });
   // ONE watcher, started by the story 015 factory and bound to that same PTY.
   const watcher = opts.startWatcher?.(handle.sessionId, handle.pty);

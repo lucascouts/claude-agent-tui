@@ -18,6 +18,8 @@
 import pty from "node-pty";
 import type { IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import * as path from "node:path";
 import { isSafeAgentRef } from "./agent-catalog.js";
 
 // PTY geometry pinned by §5.
@@ -114,6 +116,19 @@ export function resolveShell(baseEnv: Record<string, string | undefined> = proce
  * (`/^[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/`, allowing a namespaced `plugin:name`) at discovery, and
  * here we re-assert via {@link isSafeAgentRef} so an unsafe name is silently DROPPED (no flag), never
  * interpolated into the `-lc` shell string. Interactive-only — adds no `-p`/`stream-json`.
+ *
+ * Story 057 (R1.1/R1.2): an optional `additionalDirectories` list is emitted as ONE double-quoted
+ * `--add-dir "<dir>"` flag PER directory (never a single space-joined value — each dir is its own flag,
+ * matching the upstream/CLI shape). Each dir is re-asserted via {@link isSafeDir} (absolute + existing +
+ * free of shell metacharacters); an unsafe dir is DROPPED and a one-line warning is logged, never
+ * interpolated into the `-lc` shell string. Interactive-only — adds no `-p`/`stream-json`.
+ *
+ * Story 057 (R2.2): an optional `mcpConfigFile` PATH is emitted as the DOUBLE-QUOTED `--mcp-config
+ * "<file>"` flag (same style as `--settings` — a file path, so the secret-bearing JSON stays OFF the
+ * command line and survives the `-lc` shell word-splitting). The file is the fork-controlled
+ * uuid-named scratch from `mcp-config-writer.ts`. R2.2 is a HARD rule: `--strict-mcp-config` is NEVER
+ * emitted, so claude MERGES the scratch with the user's own `.mcp.json`/settings MCP servers (the
+ * parity target) instead of discarding them. Interactive-only — adds no `-p`/`stream-json`.
  */
 export function buildClaudeCmd(
   sessionId: string,
@@ -121,6 +136,8 @@ export function buildClaudeCmd(
   settingsFile?: string,
   effortLevel?: string,
   agent?: string,
+  additionalDirectories?: string[],
+  mcpConfigFile?: string,
 ): string {
   let cmd = `claude --session-id ${sessionId}`;
   if (permissionMode && permissionMode !== "default") cmd += ` --permission-mode ${permissionMode}`;
@@ -132,7 +149,51 @@ export function buildClaudeCmd(
   // the R3.3 allowlist re-assert (defense-in-depth — an unsafe name is dropped, never interpolated).
   if (agent && agent !== "default" && isSafeAgentRef(agent)) cmd += ` --agent "${agent}"`;
   if (settingsFile) cmd += ` --settings "${settingsFile}"`;
+  // Story 057 (R1.1/R1.2): ONE double-quoted `--add-dir "<dir>"` per safe dir (never a space-joined
+  // value). Each dir is re-asserted via isSafeDir (absolute + existing + no shell metachar) — an unsafe
+  // dir is DROPPED with a one-line warning, never interpolated into the `-lc` shell string.
+  cmd += buildAddDirFlags(additionalDirectories);
+  // Story 057 (R2.2): the DOUBLE-QUOTED `--mcp-config "<file>"` (mirrors `--settings` above — a file path,
+  // so the secret-bearing JSON stays off the command line). Emitted ONLY when set. R2.2 HARD rule: NEVER
+  // `--strict-mcp-config` — without it claude MERGES the scratch with the user's own .mcp.json/settings
+  // MCP servers (the parity target) instead of discarding them.
+  if (mcpConfigFile) cmd += ` --mcp-config "${mcpConfigFile}"`;
   return cmd;
+}
+
+/**
+ * Story 057 (R1.2). The directory-allowlist predicate, mirroring the discipline of
+ * {@link isSafeAgentRef}: a directory is safe to interpolate into a double-quoted `--add-dir "<dir>"`
+ * flag ONLY when it is an ABSOLUTE path, currently EXISTS on disk, and is FREE of the shell
+ * metacharacters that could break out of (or inject into) the `-lc` double-quoted argument — `"`, `$`,
+ * a backtick, or a newline/CR. Single source of truth — exported so engine-lifecycle.ts's resume path
+ * reuses it rather than re-implementing the rule.
+ */
+export function isSafeDir(p: string): boolean {
+  return path.isAbsolute(p) && existsSync(p) && !/["$`\n\r]/.test(p);
+}
+
+/**
+ * Story 057 (R1.1/R1.2). Build the trailing ` --add-dir "<dir>"` fragment for a list of additional
+ * directories: ONE double-quoted flag per dir that passes {@link isSafeDir}. An unsafe dir (relative,
+ * non-existent, or containing a shell metacharacter) is DROPPED — never interpolated — and a one-line
+ * warning is logged to stderr (the fork's diagnostic channel, never the ACP stdout wire). An
+ * empty/undefined list emits the empty string (no flags). Shared by the fresh and resume spawn paths.
+ */
+export function buildAddDirFlags(additionalDirectories?: string[]): string {
+  if (!additionalDirectories || additionalDirectories.length === 0) return "";
+  let fragment = "";
+  for (const dir of additionalDirectories) {
+    if (isSafeDir(dir)) {
+      fragment += ` --add-dir "${dir}"`;
+    } else {
+      console.error(
+        `engine-pty: dropping unsafe --add-dir entry (not absolute+existing, or contains a shell ` +
+          `metacharacter): ${JSON.stringify(dir)}`,
+      );
+    }
+  }
+  return fragment;
 }
 
 /**
@@ -147,8 +208,21 @@ export function buildSpawnArgv(
   settingsFile?: string,
   effortLevel?: string,
   agent?: string,
+  additionalDirectories?: string[],
+  mcpConfigFile?: string,
 ): [string, string] {
-  return ["-lc", buildClaudeCmd(sessionId, permissionMode, settingsFile, effortLevel, agent)];
+  return [
+    "-lc",
+    buildClaudeCmd(
+      sessionId,
+      permissionMode,
+      settingsFile,
+      effortLevel,
+      agent,
+      additionalDirectories,
+      mcpConfigFile,
+    ),
+  ];
 }
 
 /** Options for {@link spawnClaudePty}. */
@@ -195,6 +269,23 @@ export interface SpawnPtyOptions {
    * Absent → no flag. Adds no `-p`/`stream-json`; billing stays subscription `cli`.
    */
   agent?: string;
+  /**
+   * Story 057 (R1.1/R1.2): extra workspace directories surfaced as ONE double-quoted
+   * `--add-dir "<dir>"` flag per dir. Each dir is re-asserted via {@link isSafeDir} (absolute +
+   * existing + no shell metacharacter) — an unsafe dir is dropped (logged), never interpolated.
+   * INTERACTIVE-ONLY: adds no `-p`/`--print`/`stream-json`, so billing stays subscription `cli`.
+   * Absent/empty → no flag.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Story 057 (R2.2): the fork-controlled uuid-named scratch MCP-config PATH (written by
+   * `mcp-config-writer.ts`), surfaced as the DOUBLE-QUOTED `--mcp-config "<file>"` flag. A file path —
+   * the secret-bearing JSON lives in the file, OFF the command line. NEVER paired with
+   * `--strict-mcp-config`, so claude MERGES it with the user's own `.mcp.json`/settings MCP servers
+   * (the R2.2 parity target) rather than discarding them. INTERACTIVE-ONLY: adds no
+   * `-p`/`--print`/`stream-json`, so billing stays subscription `cli`. Absent → no flag.
+   */
+  mcpConfigFile?: string;
 }
 
 /** Handle returned by {@link spawnClaudePty}; story 014 manages its lifecycle. */
@@ -230,11 +321,21 @@ export function spawnClaudePty(opts: SpawnPtyOptions): PtyEngineHandle {
     settingsFile,
     effortLevel,
     agent,
+    additionalDirectories,
+    mcpConfigFile,
   } = opts;
 
   const sessionId = opts.sessionId ?? randomUUID(); // pre-generated → correlates to the JSONL transcript (v4: reused on a fresh re-spawn)
   const shell = resolveShell(baseEnv);
-  const argv = buildSpawnArgv(sessionId, permissionMode, settingsFile, effortLevel, agent);
+  const argv = buildSpawnArgv(
+    sessionId,
+    permissionMode,
+    settingsFile,
+    effortLevel,
+    agent,
+    additionalDirectories,
+    mcpConfigFile,
+  );
 
   // Sanitized, subscription-billing env (§5/§10) via the single shared definition.
   const env = buildSanitizedEnv(baseEnv);

@@ -117,6 +117,11 @@ import { MODEL_CATALOG, DEFAULT_MODEL_INFO } from "./model-catalog.js";
 import { discoverAgents, type AgentCatalogEntry } from "./agent-catalog.js";
 import { setupSessionGate } from "./permissions/gate-wiring.js";
 import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gate-wiring.js";
+// Story 057 / Task 2.3 — MCP scratch-file lifecycle (translate ACP servers → claude `--mcp-config`
+// JSON, durable 0600 write, idempotent teardown removal). Mirrors the gate's settings-scratch
+// lifecycle: written BEFORE spawn, threaded as a flag, removed on failure + teardown — with the added
+// re-spawn regeneration (R2.4). The module never logs the scratch contents/path-with-secrets (R2.3).
+import { translateMcpServers, writeMcpScratch, removeMcpScratch } from "./mcp-config-writer.js";
 
 export const CLAUDE_CONFIG_DIR =
   process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
@@ -189,7 +194,30 @@ type Session = {
   engine?: SessionEngine;
   cancelled: boolean;
   cwd: string;
-  /** Serialized snapshot of session-defining params (cwd, mcpServers) used to
+  /**
+   * Story 057 (R1.3) — the RESOLVED additional-directory list for this session (the request's
+   * `additionalDirectories`, else `_meta.additionalRoots`, else `[]`), stored so sub-task 2.3's
+   * {@link respawnSession} can re-thread the SAME `--add-dir` scope into the in-place re-spawn. This
+   * is the RAW list (per-dir sanitization is the engine's job); absent on pre-057 / replay records.
+   */
+  additionalDirectories?: string[];
+  /**
+   * Story 057 (R2.3/R2.4, sub-task 2.3) — the CURRENT MCP scratch path ({@link writeMcpScratch})
+   * threaded into this session's spawn as `--mcp-config "<file>"`. Retained so {@link teardownSession}
+   * can REMOVE it (R2.3, no orphan/secret leak) and {@link respawnSession} can REGENERATE it (R2.4:
+   * write-new-then-remove-old, swapping this to the new path). Absent when the session declared no
+   * MCP servers (and on replay-only records, which spawn nothing).
+   */
+  mcpConfigFile?: string;
+  /**
+   * Story 057 (R2.4, sub-task 2.3) — the RAW ACP `mcpServers` array the client declared at create
+   * time, retained so {@link respawnSession} can RE-translate ({@link translateMcpServers}) and
+   * regenerate the scratch for the re-spawned `claude`. (The translation output is not stored —
+   * re-translating from the source keeps the regenerated scratch faithful to the original request.)
+   * Absent/empty when no MCP servers were declared.
+   */
+  mcpServers?: NewSessionRequest["mcpServers"];
+  /** Serialized snapshot of session-defining params (cwd, mcpServers, additionalDirectories) used to
    *  detect when loadSession/resumeSession is called with changed values. */
   sessionFingerprint: string;
   settingsManager: SettingsManager;
@@ -401,6 +429,28 @@ export interface StartEngineArgs {
    * absent) keeps its blocking 2000ms watchdog (R2.1, resume-discovery-unchanged.test.ts).
    */
   inPlaceRespawn?: boolean;
+  /**
+   * Story 057 (R1.3/R3.1): the RESOLVED additional-directory list (session `additionalDirectories`,
+   * else `_meta.additionalRoots`), forwarded to BOTH the fresh ({@link createSessionEngine}) and
+   * resume ({@link spawnResumePty}) spawn paths so a re-spawn re-threads it. Each safe entry becomes
+   * one `--add-dir "<dir>"` on the interactive TUI argv; sanitization (per-dir drop of unsafe paths)
+   * is the ENGINE's job ({@link buildAddDirFlags}/`isSafeDir`, sub-task 1.1), so the list threaded
+   * here is RAW. ALWAYS-ON (no `FORK_*` opt-in gate, R3.1). Interactive-only — never on a `-p`/
+   * `stream-json` invocation (the fork has no headless path).
+   */
+  additionalDirectories?: string[];
+  /**
+   * Story 057 (R2.2/R2.3, sub-task 2.3): the fork-controlled uuid-namespaced MCP scratch path
+   * ({@link writeMcpScratch}), forwarded to BOTH the fresh ({@link createSessionEngine}) and resume
+   * ({@link spawnResumePty}) spawn paths and emitted as `--mcp-config "<file>"` (never `--strict` —
+   * R2.2 MERGE: claude folds these servers IN alongside any project/user `.mcp.json` rather than
+   * replacing them). Written BEFORE the spawn — claude reads it at startup, exactly like
+   * {@link settingsFile}, so it gates the first MCP use. ALWAYS-ON (no `FORK_*` gate); present only
+   * when the session declared ≥1 MCP server. The scratch may carry MCP auth headers/env (0600 +
+   * never logged, R2.3); the caller removes it on teardown ({@link removeMcpScratch}) and regenerates
+   * it on re-spawn ({@link respawnSession}, R2.4).
+   */
+  mcpConfigFile?: string;
 }
 
 /** The createSession injection seam: spawn the PTY engine + JSONL watcher + locate the transcript. */
@@ -567,6 +617,12 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
       effortLevel: args.effortLevel,
       // Story 056 (R3.2): an agent-selecting re-spawn carries the persona through too (--agent).
       agent: args.agent,
+      // Story 057 (R1.3/R3.1): re-thread the resolved additional-directory list so an in-place
+      // re-spawn keeps the SAME `--add-dir` scope (this resume call also serves respawnSession).
+      additionalDirectories: args.additionalDirectories,
+      // Story 057 (R2.2/R2.4): re-thread the CURRENT MCP scratch path so the re-spawned `claude`
+      // carries `--mcp-config "<file>"`; respawnSession regenerates the scratch before this call.
+      mcpConfigFile: args.mcpConfigFile,
     });
     if (args.inPlaceRespawn) {
       // === SEAM(046 R3.4 LIVE FIX): DEFER discovery for an in-place re-spawn ======================
@@ -653,6 +709,14 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     // Story 034 (§9): the per-session gate scratch settings, already on disk — claude reads them at
     // startup, so the hook gates the FIRST tool call (blocker c). Absent → ungated (pre-034) spawn.
     settingsFile: args.settingsFile,
+    // Story 057 (R1.3/R3.1): the resolved additional-directory list → one `--add-dir "<dir>"` per
+    // safe entry on the fresh interactive spawn (always-on; engine sanitizes per-dir). Empty/absent
+    // keeps the pre-057 argv byte-for-byte.
+    additionalDirectories: args.additionalDirectories,
+    // Story 057 (R2.2): the fork's MCP scratch path → `--mcp-config "<file>"` (never `--strict`,
+    // R2.2 merge); written on disk BEFORE this call so claude reads it at startup. Absent (no MCP
+    // servers declared) keeps the pre-057 argv byte-for-byte.
+    mcpConfigFile: args.mcpConfigFile,
   });
 
   // Hand the engine the cancellation handle for the background poll. STORE-ONLY here — the
@@ -710,16 +774,40 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
   };
 }
 
+/**
+ * Story 057 (R1.3/R3.1): resolve the session's additional-directory list from the request — the
+ * top-level `additionalDirectories` (the ACP field), else the legacy `_meta.additionalRoots`, else
+ * `[]`. ALWAYS-ON (no `FORK_*` opt-in gate). Both the fingerprint and the spawn must resolve through
+ * THIS single helper so the stored fingerprint and the recomputed one agree for identical inputs
+ * (the compare path in {@link getOrCreateSession} vs the store path in {@link createSession}).
+ */
+function resolveAdditionalDirs(p: {
+  additionalDirectories?: string[];
+  _meta?: NewSessionRequest["_meta"];
+}): string[] {
+  // `_meta` is the loose ACP index-signature bag (`{ [k]: unknown } | null`); the additionalRoots
+  // fallback lives at the `NewSessionMeta` top level, so narrow through that shape (the same cast the
+  // newSession handler uses for `_meta.claudeCode.options`) rather than introducing `any`.
+  const roots = (p._meta as NewSessionMeta | null | undefined)?.additionalRoots;
+  return p.additionalDirectories ?? roots ?? [];
+}
+
 /** Compute a stable fingerprint of the session-defining params so we can
  *  detect when a loadSession/resumeSession call requires tearing down and
  *  recreating the underlying Query process.  MCP servers are sorted by name
- *  so that ordering differences don't trigger unnecessary recreations. */
+ *  so that ordering differences don't trigger unnecessary recreations.
+ *  Story 057 (R1.3): the resolved additional-directory set is folded in (SORTED, so input order is
+ *  irrelevant) — a changed `--add-dir` set therefore changes the fingerprint and forces a re-spawn,
+ *  while a reordered-but-equal set does not. */
 function computeSessionFingerprint(params: {
   cwd: string;
   mcpServers?: NewSessionRequest["mcpServers"];
+  additionalDirectories?: string[];
+  _meta?: NewSessionRequest["_meta"];
 }): string {
   const servers = [...(params.mcpServers ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-  return JSON.stringify({ cwd: params.cwd, mcpServers: servers });
+  const dirs = [...resolveAdditionalDirs(params)].sort();
+  return JSON.stringify({ cwd: params.cwd, mcpServers: servers, additionalDirectories: dirs });
 }
 
 type BackgroundTerminal =
@@ -1598,6 +1686,12 @@ export class ClaudeAcpAgent implements Agent {
     if (session.gate) {
       await session.gate.teardown();
     }
+    // Story 057 (R2.3): remove the MCP scratch on teardown so no secret-bearing file (auth headers/
+    // env) is orphaned. Idempotent + never throws + never logs the contents; a no-op when the session
+    // declared no MCP servers (mcpConfigFile undefined) or after a re-spawn already swapped/removed it.
+    if (session.mcpConfigFile) {
+      await removeMcpScratch(session.mcpConfigFile);
+    }
     this.engines.delete(sessionId);
     delete this.sessions[sessionId];
   }
@@ -1960,6 +2054,17 @@ export class ClaudeAcpAgent implements Agent {
       const permissionMode = change.permissionMode ?? session.modes.currentModeId;
       const effortLevel = change.effortLevel ?? this.currentEffort(session);
       const agent = change.agent ?? this.currentAgent(session);
+      // Story 057 (R2.4): REGENERATE the MCP scratch so the re-spawned `claude` reads the CURRENT MCP
+      // config at startup (its `--mcp-config` is bound only at spawn). Re-translate from the stored raw
+      // ACP servers (kept faithful to the original request). Write the NEW scratch BEFORE removing the
+      // OLD so a write failure leaves the prior scratch intact (the still-running old PTY already read
+      // its config at startup, so removing the old file does not disturb it). removeMcpScratch is
+      // idempotent + never throws + never logs the contents (R2.3).
+      if (session.mcpServers && session.mcpServers.length > 0) {
+        const old = session.mcpConfigFile;
+        session.mcpConfigFile = await writeMcpScratch(translateMcpServers(session.mcpServers));
+        if (old) await removeMcpScratch(old);
+      }
       // FRESH re-spawn (pre-interaction): retire the old fresh PTY FIRST to free the reused sessionId —
       // there is no transcript to preserve. RESUME re-spawn: keep the R3.7 order (bring the new PTY up
       // BEFORE retiring the old, so a failed re-spawn leaves the prior PTY + currentValue intact).
@@ -1980,6 +2085,12 @@ export class ClaudeAcpAgent implements Agent {
         permissionMode,
         effortLevel,
         agent,
+        // Story 057 (R1.3/R3.1): re-thread the SAME `--add-dir` scope into the re-spawn (sub-task 1.2
+        // wired only the fresh createSession path; the in-place re-spawn must preserve it too).
+        additionalDirectories: session.additionalDirectories,
+        // Story 057 (R2.4): the freshly-regenerated MCP scratch path (see above) → `--mcp-config` on
+        // the re-spawned `claude`, so it carries the current MCP config.
+        mcpConfigFile: session.mcpConfigFile,
         sessions: this.engines,
         onEvent: (sid) => void this.pumpUpdates(sid),
       });
@@ -2772,6 +2883,23 @@ export class ClaudeAcpAgent implements Agent {
       requestedSessionId = randomUUID();
     }
 
+    // Story 057 (R1.3/R3.1): resolve the additional-directory list ONCE (always-on, no env gate) so
+    // the SAME value threads to the spawn AND is stored on the session record (sub-task 2.3's
+    // respawnSession re-threads it). The fingerprint resolves through the same helper — see below.
+    const additionalDirs = resolveAdditionalDirs(params);
+
+    // Story 057 (R2.2/R2.3, sub-task 2.3): WRITE the MCP scratch BEFORE the spawn when the session
+    // declared ≥1 MCP server. Mirrors the gate's settings-scratch ordering (GATE_FINDINGS blocker c):
+    // the file must be ON DISK before claude starts, because claude reads `--mcp-config` only at
+    // startup. A replay-only load spawns nothing → no scratch. Always-on (no `FORK_*` gate, R3.1);
+    // the ONLY condition is "mcpServers non-empty". The path is threaded into startEngine below and
+    // stored on the session record (teardown removal + re-spawn regeneration). Awaited so a write
+    // failure surfaces here (loudly) rather than racing the spawn. Never logged (R2.3).
+    let mcpConfigFile: string | undefined;
+    if (!creationOpts.replayOnly && params.mcpServers && params.mcpServers.length > 0) {
+      mcpConfigFile = await writeMcpScratch(translateMcpServers(params.mcpServers));
+    }
+
     // SettingsManager is retained (kept methods read it; teardown disposes it). The PTY TUI reads
     // the user's settings from disk itself — we no longer translate them into SDK `Options`.
     const settingsManager = new SettingsManager(params.cwd, {
@@ -2828,6 +2956,12 @@ export class ClaudeAcpAgent implements Agent {
         permissionMode: seededMode,
         // Story 034: the gate's scratch settings file, consumed as `--settings "<file>"` (fresh path).
         settingsFile: gate?.settingsPath,
+        // Story 057 (R1.3/R3.1): the resolved additional-directory list → `--add-dir` on the spawn
+        // (always-on; the engine sanitizes per-dir). Same list stored on the session record below.
+        additionalDirectories: additionalDirs,
+        // Story 057 (R2.2): the MCP scratch path (written above) → `--mcp-config "<file>"` on the
+        // spawn. Same path stored on the session record below (teardown removal + re-spawn regen).
+        mcpConfigFile,
       });
     } catch (error) {
       // A failed spawn must not leak the gate's server/scratch (story 034). teardown() is
@@ -2837,6 +2971,12 @@ export class ClaudeAcpAgent implements Agent {
       // reaches the map, so teardownSession can never dispose it. Dispose it on this path.
       settingsManager.dispose();
       await gate?.teardown();
+      // Story 057 (R2.3): a failed spawn must likewise leave NO MCP scratch behind (it was written
+      // before startEngine). removeMcpScratch is idempotent + never throws, so it cannot mask the
+      // original spawn error rethrown below.
+      if (mcpConfigFile) {
+        await removeMcpScratch(mcpConfigFile);
+      }
       if (creationOpts.resume && error instanceof Error) {
         throw RequestError.resourceNotFound(requestedSessionId);
       }
@@ -2919,6 +3059,13 @@ export class ClaudeAcpAgent implements Agent {
       engine: started.engine,
       cancelled: false,
       cwd: runtimeCwd,
+      // Story 057 (R1.3): the resolved additional-directory list, stored so sub-task 2.3's
+      // respawnSession can re-thread the SAME `--add-dir` scope into the in-place re-spawn.
+      additionalDirectories: additionalDirs,
+      // Story 057 (R2.3/R2.4): the CURRENT MCP scratch path (for teardown removal + re-spawn regen)
+      // and the RAW ACP server array (so respawnSession can re-translate + regenerate the scratch).
+      mcpConfigFile,
+      mcpServers: params.mcpServers,
       sessionFingerprint: computeSessionFingerprint(params),
       settingsManager,
       accumulatedUsage: {
