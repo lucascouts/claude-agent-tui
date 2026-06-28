@@ -19,7 +19,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveClaudePath } from "../src/claude-path.ts";
+// Story 059: dist over src — claude-path.ts gained a src→src `./image-vision-smoke.js` import (story 058)
+// that does not resolve from src/ under --experimental-strip-types; import the built module (dist over src).
+import { resolveClaudePath } from "../dist/claude-path.js";
 
 /** Run `fn` with PATH/HOME stubbed to claude-free temp dirs, then restore. */
 function withNoClaude(pathValue: string, fn: () => void): void {

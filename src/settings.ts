@@ -127,6 +127,13 @@ export class SettingsManager {
               this.handleSettingsChange();
             }
           });
+          // Story 059: a best-effort settings watcher must NOT keep the Node event loop alive on its
+          // own. A settingsManager that escapes dispose() (an initialize/re-spawn race — see the
+          // pre-existing-leak note in acp-agent.ts createSession) otherwise leaves a live fs.watch
+          // handle that hangs `node:test` on process exit (the live ACP process is held open by its
+          // stdio, never by this watcher). unref() detaches it from the loop's keep-alive set while
+          // leaving the subscription fully functional.
+          watcher.unref?.();
 
           watcher.on("error", (error) => {
             this.logger.error(`Settings watcher error for ${filePath}:`, error);
@@ -162,6 +169,8 @@ export class SettingsManager {
         this.logger.error("Failed to reload settings:", error);
       }
     }, 100);
+    // Story 059: same rationale as the watcher unref — a pending debounce timer must not block exit.
+    this.debounceTimer?.unref?.();
   }
 
   /**

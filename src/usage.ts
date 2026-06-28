@@ -42,6 +42,9 @@ export interface UsageOptions {
  *   • R3.1 — the optional `cost` field is INTENTIONALLY OMITTED and must NEVER be fabricated:
  *     the JSONL usage block carries only token counts, and `cost` is optional in the Zed v1 struct,
  *     so omitting it is contract-correct (an invented cost would violate §1 "never fabricate").
+ *     Story 059 EVIDENCE (2026-06-28): an audit of 5169 local transcripts found 0 carrying
+ *     `total_cost_usd` as a JSON key — it lives only in the SDK `result` envelope (`claude -p`), never
+ *     in the interactive PTY+tail JSONL mapped here (the 68 substring hits were all conversation text).
  */
 export function toUsageUpdate(
   message: UsageCarrier,

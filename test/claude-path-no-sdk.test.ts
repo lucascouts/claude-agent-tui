@@ -17,7 +17,10 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, sep } from "node:path";
-import { resolveClaudePath } from "../src/claude-path.ts";
+// Story 059: dist over src — claude-path.ts gained a src→src `./image-vision-smoke.js` import (story 058)
+// that does not resolve from src/ under --experimental-strip-types; import the built module (dist over src).
+// The src/** scan below still reads source files directly via fs, so the no-SDK guarantee is unchanged.
+import { resolveClaudePath } from "../dist/claude-path.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, "..", "src");

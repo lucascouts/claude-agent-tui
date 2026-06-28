@@ -17,7 +17,9 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { resolveClaudePath } from "../src/claude-path.ts";
+// Story 059: dist over src — claude-path.ts's own src→src `./image-vision-smoke.js` (story 058) does not
+// resolve under --experimental-strip-types either; same fix as the engine-pty note below.
+import { resolveClaudePath } from "../dist/claude-path.js";
 // Story 056: engine-pty gained its first src→src import (./agent-catalog.js for the R3.3 name guard),
 // which does not resolve from src/ under --experimental-strip-types; import the built module (the
 // dominant test convention — dist over src) so the compiled `./agent-catalog.js` resolves.

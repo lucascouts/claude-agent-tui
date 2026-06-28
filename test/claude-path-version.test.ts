@@ -13,12 +13,15 @@
 // node:test runner: `node --experimental-strip-types --test test/claude-path-version.test.ts`
 import { test } from "node:test";
 import assert from "node:assert/strict";
+// Story 059: dist over src — claude-path.ts gained a src→src `./image-vision-smoke.js` import (story 058)
+// that does not resolve from src/ under --experimental-strip-types; import the built module (the dominant
+// test convention, cf. engine-pty in claude-path-resolve.test.ts) so the compiled module resolves.
 import {
   parseClaudeVersion,
   detectClaudeVersion,
   reportVersionDrift,
   PROVENANCE_CLAUDE_VERSION,
-} from "../src/claude-path.ts";
+} from "../dist/claude-path.js";
 
 // === parseClaudeVersion — pure leading-semver parse ============================================
 
