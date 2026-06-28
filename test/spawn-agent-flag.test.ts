@@ -5,9 +5,11 @@
 //    the DOUBLE-QUOTED, interactive-only `--agent "<name>"`. The resume argv carries it into BOTH the
 //    `--resume "<id>"` launch AND the `|| claude` fresh fallback (it is folded into `flags`).
 //  - SECURITY (the highest-severity item): the flag is the SECOND layer of a two-layer command-injection
-//    defense. It is emitted ONLY when the name passes the R3.3 allowlist (`/^[A-Za-z0-9_-]+$/`); an unsafe
-//    name (spaces, shell metacharacters, command substitution, …) is DROPPED — never interpolated into the
-//    `-lc` shell string. (The catalog already drops unsafe names at discovery; this re-asserts at spawn.)
+//    defense. It is emitted ONLY when the name passes the R3.6 reference allowlist
+//    (`/^[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/` — a single segment OR a namespaced `plugin:name`); an
+//    unsafe or >1-segment name (spaces, shell metacharacters, command substitution, `a:b:c`, …) is
+//    DROPPED — never interpolated into the `-lc` shell string. (The catalog already drops unsafe names
+//    at discovery; this re-asserts at spawn via isSafeAgentRef.)
 //  - BILLING: the flag is interactive-only — it adds NO `-p`/`--print`/`--output-format`/`stream-json`
 //    (billing stays subscription `cli`), and coexists with `--effort`/`--permission-mode`.
 //
@@ -60,6 +62,31 @@ test("3.3 buildSpawnArgv threads the agent: argv[0]==-lc and argv[1] carries the
   assert.ok(
     argv[1].includes('--agent "code-reviewer"'),
     `expected double-quoted --agent in argv[1]: ${argv[1]}`,
+  );
+});
+
+// ── Task 7: a NAMESPACED plugin persona (`plugin:name`) is emitted double-quoted; >1 segment dropped ──
+test("7 buildClaudeCmd/buildResumeArgv emit a namespaced --agent \"epic:analyst\" (fresh + both resume halves)", () => {
+  const fresh = buildClaudeCmd(ID, undefined, undefined, undefined, "epic:analyst");
+  assert.ok(fresh.includes('--agent "epic:analyst"'), `namespaced persona quoted (fresh): ${fresh}`);
+
+  const resume = buildResumeArgv(ID, undefined, undefined, "epic:analyst")[1];
+  assert.equal(
+    resume.split('--agent "epic:analyst"').length - 1,
+    2,
+    `namespaced persona must reach both resume halves: ${resume}`,
+  );
+});
+
+test("7 SECURITY: a >1-segment ref (`a:b:c`) is DROPPED — the colon allowance is single-level only", () => {
+  assert.ok(
+    !buildClaudeCmd(ID, undefined, undefined, undefined, "a:b:c").includes("--agent"),
+    "a:b:c (two colons) must be dropped (fresh)",
+  );
+  assert.equal(
+    buildResumeArgv(ID, undefined, undefined, "a:b:c")[1],
+    `claude --resume "${ID}" || claude`,
+    "a:b:c must keep the no-flag resume skeleton",
   );
 });
 

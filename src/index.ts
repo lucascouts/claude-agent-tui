@@ -96,6 +96,14 @@ if (process.argv.includes("--cli")) {
   // (src/live-subagent-env.ts) so the truth table is unit-checkable; threaded through
   // runAcp → AgentDeps → the agent.
   const liveSubagentWatch = liveSubagentWatchEnabled();
+
+  // Story 056 / Task 7 (R3.5): enable the live agent-discovery probe in PRODUCTION only. The probe
+  // (agent-catalog.ts) spawns `claude --agent <sentinel>` once per createSession to read `claude`'s
+  // canonical persona list (enabled plugins + built-ins) for the 4th `agent` selector. Gated opt-in so
+  // the unit suite — which imports modules directly without this flag — stays on the hermetic glob
+  // fallback and never spawns the real binary. `??=` keeps a user opt-out (`FORK_AGENT_PROBE=0`).
+  process.env.FORK_AGENT_PROBE ??= "1";
+
   const { connection, agent } = runAcp({ usageUpdate, gate, liveDiff, liveSubagentWatch });
 
   async function shutdown() {

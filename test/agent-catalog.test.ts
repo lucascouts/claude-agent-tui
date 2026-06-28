@@ -14,8 +14,11 @@ import { join } from "node:path";
 import {
   discoverAgents,
   isSafeAgentName,
+  isSafeAgentRef,
+  parseAvailableAgents,
   parseFrontmatter,
   SAFE_AGENT_NAME,
+  SAFE_AGENT_REF,
   type AgentCatalogEntry,
   type DiscoverAgentsDeps,
 } from "../src/agent-catalog.ts";
@@ -33,6 +36,9 @@ const USER_DIR = join(HOME, ".claude", "agents");
  */
 function fakeDeps(files: Record<string, string>): DiscoverAgentsDeps {
   return {
+    // Task 7: the probe is the PRIMARY source — force the glob FALLBACK for these on-disk tests by
+    // making the probe yield nothing (binary absent). The probe path has its own dedicated tests below.
+    probeClaudeAgents: () => null,
     homedir: () => HOME,
     readdirMd: (dir: string) =>
       Object.keys(files)
@@ -141,6 +147,7 @@ test("discoverAgents: empty/missing dirs yield [] and never throw", () => {
 
   // Listing references a file that readFile cannot read → that file is skipped, result still [].
   const flaky: DiscoverAgentsDeps = {
+    probeClaudeAgents: () => null, // force the glob fallback (no real `claude` spawn)
     homedir: () => HOME,
     readdirMd: (dir: string) => (dir === PROJECT_DIR ? ["ghost.md"] : []),
     readFile: () => {
@@ -226,4 +233,158 @@ test("parseFrontmatter: handles quotes, missing fence, and ignores non key:value
   assert.deepEqual(parseFrontmatter("---\ntools:\n  - Read\nmodel: opus\n---\n"), {});
   // Empty value is treated as absent.
   assert.deepEqual(parseFrontmatter("---\nname:\ndescription: has\n---\n"), { description: "has" });
+});
+
+// === Task 7: HYBRID PROBE path (R3.5, R3.6) =====================================================
+
+// The exact `claude --agent <invalid>` rejection line captured live against 2.1.195 — the PRIMARY
+// discovery source. Namespaced plugin personas + bare built-ins; the bare `claude` is the no-persona
+// default and must be dropped.
+const PROBE_LINE =
+  "--agent '__sentinel__' not found. Available agents: bentoo-dev:ebuild-bumper, " +
+  "bentoo-dev:ebuild-creator, bentoo-dev:ebuild-editor, bentoo-dev:overlay-maintainer, " +
+  "bentoo-dev:qa-checker, claude, claude-code-guide, epic:analyst, epic:architect, epic:auditor, " +
+  "epic:executor, epic:reviewer, epic:tech-reviewer, epic:test-advisor, epic:validator, Explore, " +
+  "general-purpose, Plan, statusline-setup\n";
+
+test("parseAvailableAgents: extracts the comma list, ignores the prefix, trims, drops empties", () => {
+  assert.deepEqual(parseAvailableAgents("x not found. Available agents: a, b:c ,  , d\n"), [
+    "a",
+    "b:c",
+    "d",
+  ]);
+  // No `Available agents:` line ⇒ [] (the signal to fall back to the glob).
+  assert.deepEqual(parseAvailableAgents("some unrelated error text"), []);
+  assert.deepEqual(parseAvailableAgents(""), []);
+});
+
+test("discoverAgents: PRIMARY probe wins — namespaced personas + built-ins, `claude` dropped", () => {
+  // A populated glob is also provided to prove the probe takes PRECEDENCE (glob never consulted).
+  const result = discoverAgents(CWD, {
+    probeClaudeAgents: () => PROBE_LINE,
+    homedir: () => HOME,
+    readdirMd: () => ["should-not-be-read.md"],
+    readFile: () => {
+      throw new Error("glob must not be consulted when the probe yields personas");
+    },
+  });
+
+  // The bare `claude` no-persona default is dropped; everything else survives.
+  assert.equal(result.length, 18, "19 listed minus the bare `claude` default");
+  assert.equal(
+    byValue(result, "claude"),
+    undefined,
+    "the bare `claude` built-in (no-persona default) is dropped",
+  );
+  // Namespaced plugin persona present, with the raw reference as both value and displayName.
+  assert.deepEqual(byValue(result, "epic:analyst"), {
+    value: "epic:analyst",
+    displayName: "epic:analyst",
+  });
+  // Built-ins (no `:`) survive too.
+  assert.ok(byValue(result, "Explore"), "built-in Explore present");
+  assert.ok(byValue(result, "general-purpose"), "built-in general-purpose present");
+  // Sorted by value, and every returned reference is allowlist-safe (R3.6).
+  assert.deepEqual([...result].map((e) => e.value).sort(), result.map((e) => e.value));
+  for (const e of result) {
+    assert.ok(isSafeAgentRef(e.value), `probe value must be ref-safe: ${e.value}`);
+  }
+});
+
+test("discoverAgents: SECURITY — a probe-listed unsafe/multi-segment name is DROPPED", () => {
+  const result = discoverAgents(CWD, {
+    probeClaudeAgents: () =>
+      "Available agents: epic:analyst, evil;rm -rf ~, a:b:c, plug:in:agent, ok-one\n",
+    homedir: () => HOME,
+    readdirMd: () => [],
+    readFile: () => "",
+  });
+  assert.deepEqual(
+    result.map((e) => e.value),
+    ["epic:analyst", "ok-one"],
+    "command-chaining and >1-segment names dropped; safe single/namespaced survive",
+  );
+});
+
+test("discoverAgents: FALLBACK to glob when the probe is unavailable or its format changed", () => {
+  const files = {
+    [join(PROJECT_DIR, "local.md")]: "---\nname: local\ndescription: on-disk\n---\n",
+  };
+  const readdirMd = (dir: string) =>
+    dir === PROJECT_DIR ? ["local.md"] : ([] as string[]);
+  const readFile = (p: string) => {
+    const c = files[p];
+    if (c === undefined) throw new Error("ENOENT");
+    return c;
+  };
+
+  // (a) probe returns null (binary missing) → glob.
+  assert.deepEqual(
+    discoverAgents(CWD, { probeClaudeAgents: () => null, homedir: () => HOME, readdirMd, readFile })
+      .map((e) => e.value),
+    ["local"],
+  );
+  // (b) probe returns text WITHOUT an `Available agents:` line → glob.
+  assert.deepEqual(
+    discoverAgents(CWD, {
+      probeClaudeAgents: () => "claude: command failed (some new error shape)",
+      homedir: () => HOME,
+      readdirMd,
+      readFile,
+    }).map((e) => e.value),
+    ["local"],
+  );
+  // (c) probe lists ONLY the bare `claude` (nothing selectable) → falls back to glob.
+  assert.deepEqual(
+    discoverAgents(CWD, {
+      probeClaudeAgents: () => "Available agents: claude\n",
+      homedir: () => HOME,
+      readdirMd,
+      readFile,
+    }).map((e) => e.value),
+    ["local"],
+  );
+});
+
+test("discoverAgents: the DEFAULT probe is OPT-IN — without FORK_AGENT_PROBE it never spawns (glob)", () => {
+  // Drive the REAL default probe (no injected `probeClaudeAgents`) with the flag cleared: the gate
+  // must short-circuit to `null` so discovery falls back to the (here empty) glob — no `claude` spawn.
+  const saved = process.env.FORK_AGENT_PROBE;
+  delete process.env.FORK_AGENT_PROBE;
+  try {
+    assert.deepEqual(
+      discoverAgents(CWD, { homedir: () => HOME, readdirMd: () => [], readFile: () => "" }),
+      [],
+      "gated-off default probe yields the empty glob, never spawning the real claude",
+    );
+  } finally {
+    if (saved === undefined) delete process.env.FORK_AGENT_PROBE;
+    else process.env.FORK_AGENT_PROBE = saved;
+  }
+});
+
+test("isSafeAgentRef / SAFE_AGENT_REF: accepts single + namespaced, rejects multi-segment/unsafe", () => {
+  for (const ok of ["a", "Explore", "general-purpose", "epic:analyst", "bentoo-dev:qa-checker", "_x:y-2"]) {
+    assert.ok(isSafeAgentRef(ok), `should accept ${ok}`);
+    assert.ok(SAFE_AGENT_REF.test(ok), `regex should accept ${ok}`);
+  }
+  for (const bad of [
+    "",
+    "a:b:c", // more than one namespace segment
+    "a:", // empty second segment
+    ":b", // empty first segment
+    "a b",
+    "epic:ana lyst",
+    "evil;rm -rf ~",
+    "a$(whoami)",
+    "a/b",
+    "a.b",
+    null,
+    undefined,
+    42,
+  ]) {
+    assert.ok(!isSafeAgentRef(bad as unknown), `should reject ${String(bad)}`);
+  }
+  // The single-segment allowlist still rejects the `:` that the ref allows.
+  assert.ok(!isSafeAgentName("epic:analyst"), "SAFE_AGENT_NAME stays single-segment (no colon)");
 });

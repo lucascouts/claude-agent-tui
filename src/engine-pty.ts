@@ -18,7 +18,7 @@
 import pty from "node-pty";
 import type { IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
-import { isSafeAgentName } from "./agent-catalog.js";
+import { isSafeAgentRef } from "./agent-catalog.js";
 
 // PTY geometry pinned by §5.
 const PTY_NAME = "xterm-256color";
@@ -110,8 +110,9 @@ export function resolveShell(baseEnv: Record<string, string | undefined> = proce
  *
  * Story 056 (R3.3): an optional `agent` persona name is emitted as `--agent "<name>"` (DOUBLE-QUOTED,
  * grouped with the other behavior flags). This is the SECOND layer of the two-layer command-injection
- * defense — `agent-catalog.ts` already drops any name outside `/^[A-Za-z0-9_-]+$/` at discovery, and
- * here we re-assert via {@link isSafeAgentName} so an unsafe name is silently DROPPED (no flag), never
+ * defense — `agent-catalog.ts` already drops any name outside `SAFE_AGENT_REF`
+ * (`/^[A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?$/`, allowing a namespaced `plugin:name`) at discovery, and
+ * here we re-assert via {@link isSafeAgentRef} so an unsafe name is silently DROPPED (no flag), never
  * interpolated into the `-lc` shell string. Interactive-only — adds no `-p`/`stream-json`.
  */
 export function buildClaudeCmd(
@@ -129,7 +130,7 @@ export function buildClaudeCmd(
   // Story 056 (R3.3): the agent persona, double-quoted, emitted ONLY for a real persona — the "default"
   // sentinel (= no persona, mirrors --effort/--permission-mode) emits nothing — and only when it passes
   // the R3.3 allowlist re-assert (defense-in-depth — an unsafe name is dropped, never interpolated).
-  if (agent && agent !== "default" && isSafeAgentName(agent)) cmd += ` --agent "${agent}"`;
+  if (agent && agent !== "default" && isSafeAgentRef(agent)) cmd += ` --agent "${agent}"`;
   if (settingsFile) cmd += ` --settings "${settingsFile}"`;
   return cmd;
 }

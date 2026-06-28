@@ -30,7 +30,7 @@ import {
   spawnClaudePty,
 } from "./engine-pty.js";
 import type { PtyEngineHandle } from "./engine-pty.js";
-import { isSafeAgentName } from "./agent-catalog.js";
+import { isSafeAgentRef } from "./agent-catalog.js";
 import { attachAnsiMirror } from "./ansi-mirror.js";
 import type { AnsiMirrorOptions } from "./ansi-mirror.js";
 
@@ -276,8 +276,9 @@ const RESUME_PTY_NAME = "xterm-256color";
  * Story 056 (R3.3): an optional `agent` persona name is likewise carried via `flags` as the
  * DOUBLE-QUOTED `--agent "<name>"`. Because `flags` is interpolated into BOTH the `--resume "<id>"`
  * launch AND the `|| claude` fresh fallback, this single addition reaches both branches (R3.3). It is
- * the SECOND layer of the command-injection defense — re-asserted via {@link isSafeAgentName} so an
- * unsafe name is DROPPED (no flag), never interpolated. Still no `-p`/`--print`/`stream-json`.
+ * the SECOND layer of the command-injection defense — re-asserted via {@link isSafeAgentRef} (which
+ * accepts a namespaced `plugin:name`) so an unsafe name is DROPPED (no flag), never interpolated.
+ * Still no `-p`/`--print`/`stream-json`.
  */
 export function buildResumeArgv(
   sessionId: string,
@@ -291,7 +292,7 @@ export function buildResumeArgv(
   // Story 056 (R3.3): double-quoted agent flag, emitted only for a real persona (the "default"
   // sentinel = no persona emits nothing, mirroring --effort) and only when it passes the R3.3
   // allowlist re-assert; folded into `flags` so it carries into both the --resume and || claude halves.
-  const ag = agent && agent !== "default" && isSafeAgentName(agent) ? ` --agent "${agent}"` : "";
+  const ag = agent && agent !== "default" && isSafeAgentRef(agent) ? ` --agent "${agent}"` : "";
   const flags = `${pm}${ef}${ag}`;
   return ["-c", `claude --resume "${sessionId}"${flags} || claude${flags}`];
 }
