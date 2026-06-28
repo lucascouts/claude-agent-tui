@@ -155,6 +155,13 @@ export function buildSpawnArgv(
 export interface SpawnPtyOptions {
   /** Host working directory the TUI runs in; passed straight through to the PTY (§5). */
   cwd: string;
+  /**
+   * Story 056 v4 — an OPTIONAL pre-chosen session id for an in-place FRESH re-spawn (a selector change
+   * before the first interaction reuses the session's existing id). Absent → a new `randomUUID()` is
+   * generated (the normal createSession path). claude accepts a reused `--session-id` once the prior
+   * PTY for that id has exited (LIVE-VERIFIED).
+   */
+  sessionId?: string;
   /** Base environment to sanitize; defaults to the parent process env. */
   baseEnv?: Record<string, string | undefined>;
   /**
@@ -225,7 +232,7 @@ export function spawnClaudePty(opts: SpawnPtyOptions): PtyEngineHandle {
     agent,
   } = opts;
 
-  const sessionId = randomUUID(); // pre-generated → correlates to the JSONL transcript
+  const sessionId = opts.sessionId ?? randomUUID(); // pre-generated → correlates to the JSONL transcript (v4: reused on a fresh re-spawn)
   const shell = resolveShell(baseEnv);
   const argv = buildSpawnArgv(sessionId, permissionMode, settingsFile, effortLevel, agent);
 

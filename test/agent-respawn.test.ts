@@ -43,6 +43,7 @@ type Captured = {
   sessionId?: string;
   resume?: boolean;
   inPlaceRespawn?: boolean;
+  permissionMode?: string;
   effortLevel?: string;
   agent?: string;
 };
@@ -54,6 +55,7 @@ function makeStartEngine() {
     cwd: string;
     resume?: boolean;
     inPlaceRespawn?: boolean;
+    permissionMode?: string;
     effortLevel?: string;
     agent?: string;
   }) => {
@@ -61,6 +63,7 @@ function makeStartEngine() {
       sessionId: args.sessionId,
       resume: args.resume,
       inPlaceRespawn: args.inPlaceRespawn,
+      permissionMode: args.permissionMode,
       effortLevel: args.effortLevel,
       agent: args.agent,
     });
@@ -149,37 +152,43 @@ test("3.4 idle + agent change → re-spawns the SAME sessionId carrying --agent 
   );
 });
 
-test("3.4 pre-interaction agent change THROWS and does NOT swap the engine (R3.4 guard)", async (t) => {
+test("v4 pre-interaction agent change does a FRESH re-spawn (resume:false) reusing the sessionId", async (t) => {
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
-  // session.interacted is falsy at fresh create — the re-spawn guard must refuse.
-  const engineBefore = sessions[sessionId].engine;
+  // session.interacted is falsy at fresh create. v4: instead of throwing (the old R3.4 guard), the
+  // re-spawn goes FRESH — there is no transcript to `--resume` yet, so it re-spawns reusing the same id
+  // with `--agent`, which is what makes the agent selector apply BEFORE the first prompt (the live gap).
   const callsBefore = fake.calls.length;
 
-  await assert.rejects(
-    setOption(agent, sessionId, "agent", "code-reviewer"),
-    /before the first interaction/,
-    "an agent change before the first interaction must throw the no-transcript-to-resume error",
+  await setOption(agent, sessionId, "agent", "code-reviewer");
+
+  assert.ok(
+    fake.calls.length > callsBefore,
+    "a pre-interaction agent change must still re-spawn (fresh), not silently no-op",
   );
+  const respawn = fake.calls[fake.calls.length - 1];
   assert.equal(
-    fake.calls.length,
-    callsBefore,
-    "a refused re-spawn must NOT call startEngine (no new spawn)",
+    respawn.resume,
+    false,
+    "the pre-interaction re-spawn must be FRESH (resume:false — no transcript to resume)",
   );
+  assert.equal(respawn.inPlaceRespawn, true, "it is still an in-place re-spawn");
+  assert.equal(respawn.sessionId, sessionId, "the fresh re-spawn must REUSE the same sessionId");
+  assert.equal(respawn.agent, "code-reviewer", "the fresh re-spawn must carry the selected persona");
   assert.equal(
-    sessions[sessionId].engine,
-    engineBefore,
-    "a refused re-spawn must NOT swap the engine (session left intact)",
+    agentCurrentValue(sessions, sessionId),
+    "code-reviewer",
+    "the agent currentValue must reflect the applied persona (no longer reverts to default)",
   );
 });
 
-test("3.4 an effort re-spawn PRESERVES the selected agent (and threads both flags) (R3.3/R3.4)", async (t) => {
+test("v4 a mode re-spawn (dontAsk) PRESERVES the selected agent (threads agent ?? currentAgent)", async (t) => {
+  // effort no longer re-spawns (it is a live /effort inject), so the preserve-across-respawn property is
+  // now exercised via a dontAsk MODE re-spawn — it must still carry the selected agent forward.
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
-  sessions[sessionId].interacted = true; // reach the re-spawn path, not the pre-interaction guard
+  sessions[sessionId].interacted = true; // reach the resume re-spawn path, not the fresh pre-interaction one
 
-  // Surface the effort option by selecting an effort-capable model (a /model inject, NOT a re-spawn).
-  await setOption(agent, sessionId, "model", "sonnet");
   // Select the agent persona (its first re-spawn) and commit its currentValue.
   await setOption(agent, sessionId, "agent", "code-reviewer");
   assert.equal(
@@ -188,23 +197,17 @@ test("3.4 an effort re-spawn PRESERVES the selected agent (and threads both flag
     "precondition: the agent change committed its currentValue",
   );
 
-  const callsBeforeEffort = fake.calls.length;
-  // Now change effort — this re-spawn must PRESERVE the agent (change.agent undefined → currentAgent).
-  await setOption(agent, sessionId, "effort", "high");
+  const callsBeforeMode = fake.calls.length;
+  // Now switch to a re-spawn mode (dontAsk) — this re-spawn must PRESERVE the agent (change.agent
+  // undefined → currentAgent).
+  await setOption(agent, sessionId, "mode", "dontAsk");
 
-  assert.ok(
-    fake.calls.length > callsBeforeEffort,
-    "the effort change must trigger its own re-spawn",
-  );
+  assert.ok(fake.calls.length > callsBeforeMode, "the dontAsk change must trigger its own re-spawn");
   const respawn = fake.calls[fake.calls.length - 1];
-  assert.equal(
-    respawn.effortLevel,
-    "high",
-    "the effort re-spawn must carry the new effort level",
-  );
+  assert.equal(respawn.permissionMode, "dontAsk", "the mode re-spawn must carry the new permission mode");
   assert.equal(
     respawn.agent,
     "code-reviewer",
-    "the effort re-spawn must PRESERVE the selected agent (respawnSession threads agent ?? currentAgent)",
+    "the mode re-spawn must PRESERVE the selected agent (respawnSession threads agent ?? currentAgent)",
   );
 });

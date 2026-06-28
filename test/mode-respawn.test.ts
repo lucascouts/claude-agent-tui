@@ -141,30 +141,32 @@ test("4.4 a re-spawn FAILURE surfaces the error and leaves the prior mode curren
   );
 });
 
-test("R3.4 LIVE FIX guard: dontAsk BEFORE the first interaction does NOT re-spawn (no --resume of a missing transcript)", async (t) => {
-  // The live bug: a boot-time default_config_options.mode=bypassPermissions made Zed send the switch
-  // before any interaction. The re-spawn's `claude --resume <id>` then has no transcript, falls back
-  // (`|| claude`) to a NEW untracked id, and stalls the next turn until the 120s watchdog — after
-  // killing the live fresh PTY. The guard refuses while `interacted` is falsy: no 2nd startEngine call,
-  // the prior currentValue is untouched, and the error tells the user to send a prompt first.
+test("v4 dontAsk BEFORE the first interaction does a FRESH re-spawn (resume:false), applying the mode", async (t) => {
+  // The old R3.4 guard REFUSED this (a boot-time dontAsk/bypass left the mode unchanged + threw). v4:
+  // there is no transcript to `--resume` pre-interaction, so the re-spawn goes FRESH reusing the same id
+  // with `--permission-mode` — claude accepts a reused --session-id once the prior PTY exits — so a
+  // boot-time non-cyclable mode now actually applies (the user's live gap, generalized to mode/agent).
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
-  // NOTE: interacted is intentionally NOT set — this is the pre-first-interaction (boot) state.
-  const before = modeCurrentValue(sessions, sessionId);
-  await assert.rejects(
-    setMode(agent, sessionId, "dontAsk"),
-    /before the first interaction/,
-    "a pre-interaction re-spawn must be refused with a clear message (R3.4 guard)",
-  );
+  // NOTE: interacted is intentionally NOT set — the pre-first-interaction (boot) state.
+  await setMode(agent, sessionId, "dontAsk");
+
   assert.equal(
     fake.calls.length,
-    1,
-    "the guard must NOT trigger a re-spawn — only the createSession spawn (1 call), no 2nd startEngine",
+    2,
+    "a fresh re-spawn must occur: the createSession spawn (1) + the fresh in-place re-spawn (2)",
   );
+  const respawn = fake.calls[1];
+  assert.equal(
+    respawn.resume,
+    false,
+    "the pre-interaction re-spawn must be FRESH (resume:false — there is no transcript to resume)",
+  );
+  assert.equal(respawn.sessionId, sessionId, "the fresh re-spawn must REUSE the same sessionId");
   assert.equal(
     modeCurrentValue(sessions, sessionId),
-    before,
-    "a refused re-spawn must leave the prior mode currentValue unchanged",
+    "dontAsk",
+    "the mode currentValue must now reflect dontAsk (applied, not reverted)",
   );
-  assert.ok(sessions[sessionId], "the live fresh session/PTY must remain intact (not discarded)");
+  assert.ok(sessions[sessionId], "the session must remain tracked under the same id");
 });

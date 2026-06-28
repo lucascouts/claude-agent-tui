@@ -1,23 +1,27 @@
-// Story 046 / Task 3.2 — apply a reasoning-effort change (R2.2). AUTHORED IN RUN MODE: the apply
-// mechanism was fixed by Probe B (1.2), whose verdict is RE-SPAWN — `claude --effort <level>` is a
-// spawn flag with no live mid-session path. So this mirrors mode-respawn.test.ts (the dontAsk/bypass
-// re-spawn) INCLUDING the R3.7 failure path (Reviewer N1): a failed effort re-spawn surfaces the error,
-// leaves the prior effort currentValue unchanged, and does not tear the session down.
+// Story 046 / Task 3.2 + Story 056 v4 — apply a reasoning-effort change (R2.2).
+//
+// SUPERSEDED MECHANISM: the 046 Probe-B verdict was RE-SPAWN (`--effort` was a spawn flag with no live
+// path). claude 2.1.195 DOES have a live `/effort <level>` local TUI command (LIVE-VERIFIED), so effort
+// now mirrors the `/model` inject: a side-channel PTY write, NO re-spawn, NO turn — which means it also
+// applies BEFORE the first interaction (the re-spawn's --resume idle-guard was why effort silently
+// failed pre-first-prompt). This file now asserts the inject (not a startEngine re-spawn call).
 //
 // The effort configOption only surfaces for an effort-capable model, so each test selects `sonnet`
-// first (a live /model inject — NOT a re-spawn), then changes effort (the re-spawn under test).
-// AGENT INTEGRATION over the startEngine seam (mode-respawn precedent). node:test (build first):
+// first (a live /model inject), then changes effort (the /effort inject under test).
 //   node --experimental-strip-types --test test/effort-apply.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ClaudeAcpAgent } from "../dist/acp-agent.js";
 
-function makeFakePty() {
+/** A fake PTY that CAPTURES every `write` into the shared `writes` array (so the inject is observable). */
+function makeFakePty(writes: string[]) {
   const pty = {
     onExit: () => ({ dispose() {} }),
     onData: () => ({ dispose() {} }),
     resize: () => {},
-    write: () => {},
+    write: (d: string) => {
+      writes.push(d);
+    },
     kill: () => {},
   };
   return pty as never;
@@ -32,23 +36,21 @@ function makeClient() {
   } as never;
 }
 
-/** startEngine seam: call 1 is the createSession spawn; a later call is the effort re-spawn. A variant
- *  FAILS (R3.7) on the Nth call. A model switch is an inject, NOT a startEngine call. */
-function makeStartEngine(opts?: { failOnCall?: number }) {
+/** startEngine seam: call 1 is the createSession spawn. Effort no longer re-spawns, so any 2nd call
+ *  would be a regression. All PTYs share one `writes` array so side-channel injects are observable. */
+function makeStartEngine() {
   const calls: Array<{ sessionId?: string; resume?: boolean }> = [];
+  const writes: string[] = [];
   const startEngine = (args: { sessionId?: string; cwd: string; resume?: boolean }) => {
     calls.push({ sessionId: args.sessionId, resume: args.resume });
-    if (opts?.failOnCall && calls.length === opts.failOnCall) {
-      throw new Error("effort re-spawn exploded");
-    }
     return {
       sessionId: args.sessionId ?? "11111111-1111-4111-8111-111111111111",
-      pty: makeFakePty(),
+      pty: makeFakePty(writes),
       watcher: { stop: () => {}, notifyEndOfTurn: () => {} },
       cwd: args.cwd,
     };
   };
-  return { startEngine, calls };
+  return { startEngine, calls, writes };
 }
 
 async function newSession(
@@ -76,54 +78,61 @@ const effortCurrentValue = (
   id: string,
 ) => sessions[id].configOptions.find((o) => o.id === "effort")?.currentValue;
 
-test("3.2 idle + effort change → re-spawns the SAME sessionId (R2.2, Probe-B re-spawn path)", async (t) => {
+test("v4 effort change INJECTS `/effort <level>` live — no re-spawn, works BEFORE the first interaction", async (t) => {
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
-  sessions[sessionId].interacted = true; // R3.4 guard: a re-spawn is only allowed AFTER the first interaction
-  // Surface the effort option by selecting an effort-capable model (a /model inject, NOT a re-spawn).
-  await setOption(agent, sessionId, "model", "sonnet");
+  // NOTE: `interacted` is deliberately NOT set — this is the pre-first-prompt case that used to fail
+  // silently under the re-spawn idle-guard (the live bug the user hit).
+  await setOption(agent, sessionId, "model", "sonnet"); // surface the effort option (a /model inject)
+  // The effort is seeded from the machine's real settings, so pick a level GUARANTEED to differ from it
+  // (else the no-op short-circuit fires and nothing injects — a test-hermeticity, not a code, issue).
+  const start = String(effortCurrentValue(sessions, sessionId));
+  const target = start === "low" ? "high" : "low";
   const callsBeforeEffort = fake.calls.length;
-  await setOption(agent, sessionId, "effort", "high");
-  assert.ok(
-    fake.calls.length > callsBeforeEffort,
-    `an effort change must trigger a re-spawn (a new startEngine call), got ${fake.calls.length} (was ${callsBeforeEffort})`,
-  );
-  assert.equal(
-    fake.calls[fake.calls.length - 1].sessionId,
-    sessionId,
-    "the effort re-spawn must reuse the SAME sessionId (transcript preserved)",
-  );
-});
+  fake.writes.length = 0; // drop the /model write — assert only the effort inject below
 
-test("3.2 an effort re-spawn FAILURE surfaces the error and leaves the prior currentValue unchanged (R3.7)", async (t) => {
-  // call 1 = createSession spawn; the model switch is an inject (no startEngine call); the effort
-  // re-spawn is call 2 → fail it.
-  const fake = makeStartEngine({ failOnCall: 2 });
-  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
-  sessions[sessionId].interacted = true; // R3.4 guard: reach the re-spawn (the failure under test), not the guard
-  await setOption(agent, sessionId, "model", "sonnet");
-  const before = effortCurrentValue(sessions, sessionId);
-  await assert.rejects(
-    setOption(agent, sessionId, "effort", "high"),
-    "a failed effort re-spawn must surface to the client (R3.7)",
+  await setOption(agent, sessionId, "effort", target);
+
+  assert.equal(
+    fake.calls.length,
+    callsBeforeEffort,
+    "an effort change must NOT re-spawn (no new startEngine call) — it is a live /effort inject",
+  );
+  assert.match(
+    fake.writes.join(""),
+    new RegExp(`/effort ${target}`),
+    `expected a live /effort ${target} inject in the PTY writes, got: ${JSON.stringify(fake.writes.join(""))}`,
   );
   assert.equal(
     effortCurrentValue(sessions, sessionId),
-    before,
-    "a failed effort re-spawn must leave the prior effort currentValue unchanged (R3.7)",
-  );
-  assert.ok(
-    sessions[sessionId],
-    "a failed effort re-spawn must not leave the session torn-down-without-replacement (R3.7)",
+    target,
+    "the effort currentValue must reflect the new level (optimistic, like /model)",
   );
 });
 
-test("3.2 an effort no-op (same level) triggers no re-spawn (Unchanged Behavior 4)", async (t) => {
+test("v4 an effort no-op (same level) injects NO `/effort` command (Unchanged Behavior)", async (t) => {
   const fake = makeStartEngine();
   const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
   await setOption(agent, sessionId, "model", "sonnet");
-  const current = effortCurrentValue(sessions, sessionId);
-  const callsBefore = fake.calls.length;
-  await setOption(agent, sessionId, "effort", String(current));
-  assert.equal(fake.calls.length, callsBefore, "selecting the current effort must NOT re-spawn (no-op)");
+  const current = String(effortCurrentValue(sessions, sessionId));
+  fake.writes.length = 0;
+
+  await setOption(agent, sessionId, "effort", current);
+
+  assert.ok(
+    !fake.writes.join("").includes("/effort"),
+    `selecting the already-current effort must inject nothing (no-op), got: ${JSON.stringify(fake.writes.join(""))}`,
+  );
+});
+
+test("v4 the `/effort` inject does not introduce any -p/--print/stream-json (billing seam intact)", async (t) => {
+  const fake = makeStartEngine();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine);
+  await setOption(agent, sessionId, "model", "sonnet");
+  const start = String(effortCurrentValue(sessions, sessionId));
+  const target = start === "max" ? "low" : "max"; // a level guaranteed to differ → a real inject
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "effort", target);
+  const all = fake.writes.join("");
+  assert.ok(!/--print|stream-json|(^|\s)-p(\s|$)/.test(all), `effort inject must carry no credit token: ${JSON.stringify(all)}`);
 });

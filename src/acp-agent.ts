@@ -251,6 +251,12 @@ type Session = {
    */
   pendingModelInjection?: string;
   /**
+   * Story 056 v4 — an effort change (`/effort <level>`) requested WHILE a turn is in flight is deferred
+   * here (last-write-wins) and flushed as a side-channel PTY write once the turn settles (mirrors
+   * {@link pendingModelInjection}). Undefined when nothing is queued.
+   */
+  pendingEffortInjection?: string;
+  /**
    * Story 046 (R3.8) — true WHILE an in-place re-spawn (R3.4 dontAsk/bypass switch) is between the old
    * PTY teardown and the new PTY being ready. Selector changes arriving in this window are rejected
    * rather than written to a dead PTY.
@@ -635,6 +641,9 @@ export async function defaultStartEngine(args: StartEngineArgs): Promise<Started
     baseEnv: args.baseEnv,
     sessions: args.sessions,
     spawn: args.spawn,
+    // Story 056 v4: a FRESH in-place re-spawn (a pre-interaction selector change) reuses the session's
+    // existing id; a normal createSession passes none here (inPlaceRespawn absent) → fresh randomUUID.
+    sessionId: args.inPlaceRespawn ? args.sessionId : undefined,
     // Story 046 (R3.2/R2.2): the seeded permission mode + effort → `--permission-mode`/`--effort` on
     // the fresh spawn (non-"default" only; "default"/undefined keep the byte-for-byte pre-046 argv).
     permissionMode: args.permissionMode,
@@ -1678,17 +1687,29 @@ export class ClaudeAcpAgent implements Agent {
 
     if (params.configId === "mode") {
       await this.applySessionMode(params.sessionId, resolvedValue);
+      // Story 056 v4 (OPTIMISTIC notify) — for a CYCLABLE mode, push `current_mode_update` to the panel
+      // BEFORE driving the (slower) closed-loop Shift+Tab cycle, so the selector reflects the choice
+      // INSTANTLY instead of waiting out the cycle. Safe: the permission gate reads the mode from the
+      // transcript (tail-as-truth), NOT this notification, and a cyclable drive never re-spawns (no R3.7
+      // rollback to honor). dontAsk/bypass (a re-spawn that CAN fail) keep the notify AFTER the drive so
+      // a failed switch does not leave the panel showing a mode that never applied.
+      const cyclable = CYCLABLE_MODES.has(resolvedValue);
+      if (cyclable) {
+        await this.client.sessionUpdate({
+          sessionId: params.sessionId,
+          update: { sessionUpdate: "current_mode_update", currentModeId: resolvedValue },
+        });
+      }
       // Bug A fix (Story 046 R3) — Zed sends mode changes via set_config_option(configId:"mode"), so
       // the DRIVE must happen HERE too. This path used to only validate (read-only), leaving claude
       // stuck on its spawn mode — the live permission mode never changed (bypass/acceptEdits no-op'd).
       await this.driveModeIntoTui(params.sessionId, session, resolvedValue);
-      await this.client.sessionUpdate({
-        sessionId: params.sessionId,
-        update: {
-          sessionUpdate: "current_mode_update",
-          currentModeId: resolvedValue,
-        },
-      });
+      if (!cyclable) {
+        await this.client.sessionUpdate({
+          sessionId: params.sessionId,
+          update: { sessionUpdate: "current_mode_update", currentModeId: resolvedValue },
+        });
+      }
     }
     // === SEAM(023→046) Group 1: the dropped SDK `query.setModel` is replaced by a PTY side-channel.
     // `/model <alias>` is a LOCAL TUI command (no assistant turn, no stop_reason) — inject it as a
@@ -1699,10 +1720,11 @@ export class ClaudeAcpAgent implements Agent {
     if (params.configId === "model") {
       this.applyModelSwitch(session, resolvedValue);
     } else if (params.configId === "effort") {
-      // Story 046 (R2.2): Probe B verdict — effort has no live mid-session path, so an effort change
-      // re-spawns in place with `--effort <level>` (idle-guarded, R3.7 failure path). On throw, the
-      // applyConfigOptionValue below is skipped so the prior currentValue stays unchanged.
-      await this.applyEffortChange(params.sessionId, session, resolvedValue);
+      // Story 056 v4: effort is now a LIVE `/effort <level>` injection (claude 2.1.195 has the command),
+      // mirroring /model — no re-spawn, works before the first interaction. Mid-turn it defers; it never
+      // throws, so applyConfigOptionValue below always commits the new currentValue (optimistic, like
+      // /model). The flag path stays only to seed/preserve effort across mode/agent re-spawns.
+      this.applyEffortChange(session, resolvedValue);
     } else if (params.configId === "agent") {
       // Story 056 (R3.3/R3.4): the agent persona has no live mid-session path either — apply it by an
       // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
@@ -1827,6 +1849,12 @@ export class ClaudeAcpAgent implements Agent {
       session.pendingModelInjection = undefined;
       this.injectModelCommand(session, alias);
     }
+    // Story 056 v4 — flush a deferred effort `/effort <level>` injection too (last-write-wins).
+    const effort = session.pendingEffortInjection;
+    if (effort !== undefined) {
+      session.pendingEffortInjection = undefined;
+      this.injectEffortCommand(session, effort);
+    }
   }
 
   /**
@@ -1916,29 +1944,38 @@ export class ClaudeAcpAgent implements Agent {
     // once. The user/Zed retries after the first prompt; a boot-time default_config_options dontAsk/
     // bypass therefore stays at the fresh spawn's mode (use a fresh-spawn --permission-mode seed for
     // start-in-bypass, a documented follow-up). The OTHER selector's currentValue is left unchanged.
-    if (!session.interacted) {
-      throw new Error(
-        "Cannot switch to a re-spawn mode/effort before the first interaction (no transcript to resume yet); send a prompt first, then switch.",
-      );
-    }
+    // Story 056 v4 — before the first interaction there is NO transcript to `--resume`, so the re-spawn
+    // is FRESH (reusing the SAME sessionId — LIVE-VERIFIED: claude accepts a reused --session-id once the
+    // prior PTY exits). After the first interaction, `--resume` reattaches the transcript (R3.4). This is
+    // what lets the agent/effort/mode selectors apply BEFORE the first prompt — the live gap the user hit
+    // (previously this threw and the selector silently reverted). NOTE: effort no longer reaches here
+    // (it is a live `/effort` inject now); the fresh path serves agent and the dontAsk/bypass modes.
+    const fresh = !session.interacted;
     session.respawning = true;
     try {
       const oldEngine = session.engine;
       // Preserve the OTHER selectors' current values so re-spawning for one (mode, effort, OR agent)
-      // does not reset the others — the resume argv carries all three flags. There are three selectors
-      // now (Story 056 added agent): a mode re-spawn keeps effort+agent, an effort re-spawn keeps
-      // mode+agent, and an agent re-spawn keeps mode+effort.
+      // does not reset the others — the argv carries all three flags. There are three selectors now
+      // (Story 056 added agent): a mode re-spawn keeps effort+agent, an agent re-spawn keeps mode+effort.
       const permissionMode = change.permissionMode ?? session.modes.currentModeId;
       const effortLevel = change.effortLevel ?? this.currentEffort(session);
       const agent = change.agent ?? this.currentAgent(session);
+      // FRESH re-spawn (pre-interaction): retire the old fresh PTY FIRST to free the reused sessionId —
+      // there is no transcript to preserve. RESUME re-spawn: keep the R3.7 order (bring the new PTY up
+      // BEFORE retiring the old, so a failed re-spawn leaves the prior PTY + currentValue intact).
+      if (fresh) {
+        oldEngine?.cleanup();
+        oldEngine?.kill();
+      }
       // Re-spawn through the SAME startEngine seam createSession uses, reusing the sessionId so the
-      // transcript is reattached (R3.4); the flags flow into the flag-carrying resume argv.
+      // transcript is reattached on resume (R3.4) or freshly created on the pre-interaction path; the
+      // flags flow into the flag-carrying spawn argv (fresh `buildClaudeCmd` or `buildResumeArgv`).
       const started = await this.startEngine({
         sessionId,
         cwd: session.cwd,
-        resume: true,
-        // Story 046 (R3.4 LIVE FIX): an in-place re-spawn may run before the first interaction (boot
-        // bypass), so DEFER discovery instead of the 2000ms fatal watchdog — see defaultStartEngine.
+        resume: !fresh,
+        // Story 046 (R3.4 LIVE FIX): an in-place re-spawn may run before the first interaction, so DEFER
+        // discovery instead of the 2000ms fatal watchdog — see defaultStartEngine.
         inPlaceRespawn: true,
         permissionMode,
         effortLevel,
@@ -1946,9 +1983,11 @@ export class ClaudeAcpAgent implements Agent {
         sessions: this.engines,
         onEvent: (sid) => void this.pumpUpdates(sid),
       });
-      // New PTY is live — only now retire the old one (idle ⇒ no pending turn to double-resolve) and swap.
-      oldEngine?.cleanup();
-      oldEngine?.kill();
+      if (!fresh) {
+        // New PTY is live — only now retire the old one (idle ⇒ no pending turn to double-resolve).
+        oldEngine?.cleanup();
+        oldEngine?.kill();
+      }
       session.pty = started.pty;
       session.engine = started.engine;
       session.watcher = started.watcher;
@@ -1973,24 +2012,32 @@ export class ClaudeAcpAgent implements Agent {
   }
 
   /**
-   * Story 046 (R2.2, design §7) — apply a reasoning-effort change. Probe B verdict: effort has no live
-   * mid-session mechanism (`--effort` is a spawn flag), so a change re-spawns in place with the flag
-   * (mirroring the dontAsk/bypass mode path), idle-guarded, with the R3.7 failure path and R3.8 latch.
-   * A no-op change applies nothing. Throwing here leaves the caller's applyConfigOptionValue unrun, so
-   * the prior currentValue is left unchanged on failure (R3.7).
+   * Story 046 (R2.2) + Story 056 v4 — apply a reasoning-effort change LIVE via `/effort <level>`.
+   * SUPERSEDES the 046 Probe-B re-spawn: `claude` 2.1.195 DOES have a live `/effort <level>` local TUI
+   * command (LIVE-VERIFIED — "Set effort level to high…", applied inline, NO "Switch?" dialog unlike
+   * /model). So effort now mirrors {@link applyModelSwitch}: a side-channel write, no re-spawn, no turn —
+   * which means it ALSO works BEFORE the first interaction (the re-spawn's --resume idle-guard was why
+   * effort silently failed pre-first-prompt). Mid-turn it defers (pendingEffortInjection) and flushes
+   * when the turn settles. A no-op change applies nothing; effort stays preserved across mode/agent
+   * re-spawns (currentEffort → --effort flag), so the spawn-flag path remains as the seed/preserve route.
    */
-  private async applyEffortChange(
-    sessionId: string,
-    session: Session,
-    level: string,
-  ): Promise<void> {
+  private applyEffortChange(session: Session, level: string): void {
     if (level === this.currentEffort(session)) return; // no value change → no-op
-    if (session.turnDetector !== undefined || session.respawning) {
-      throw new Error(
-        "Cannot change effort while the session is busy (a turn is in flight or a re-spawn is underway); retry when idle",
-      );
+    if (session.turnDetector !== undefined) {
+      // A turn is in flight — injecting mid-turn corrupts the PTY input. Defer (coalesce, mirrors /model).
+      session.pendingEffortInjection = level;
+      return;
     }
-    await this.respawnSession(sessionId, session, { effortLevel: level });
+    this.injectEffortCommand(session, level);
+  }
+
+  /**
+   * Side-channel `/effort <level>` write — synchronous, resolves immediately (never a turn). Unlike
+   * `/model`, `/effort` applies INLINE with no blocking "Switch?" dialog (LIVE-VERIFIED 2.1.195), so
+   * sendPrompt's own submit `\r` is sufficient and NO confirm Enter is scheduled.
+   */
+  private injectEffortCommand(session: Session, level: string): void {
+    sendPrompt(session.pty, `/effort ${level}`, (fn) => fn());
   }
 
   /**

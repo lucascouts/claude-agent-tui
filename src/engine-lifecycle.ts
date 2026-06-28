@@ -356,6 +356,12 @@ export function spawnResumePty(opts: SpawnResumeOptions): PtyEngineHandle {
 export interface CreateSessionEngineOptions {
   /** Host working directory the spawned TUI runs in (story 013 spawn). */
   cwd: string;
+  /**
+   * Story 056 v4 — OPTIONAL pre-chosen session id for an in-place FRESH re-spawn (a pre-interaction
+   * selector change reuses the session's id). Forwarded to {@link spawnClaudePty}; absent → a fresh
+   * `randomUUID()` (the normal createSession path).
+   */
+  sessionId?: string;
   /** Base environment to sanitize; defaults to the parent process env. */
   baseEnv?: Record<string, string | undefined>;
   /** Injectable spawn function (defaults to node-pty's `spawn`); tests pass a fake. */
@@ -427,6 +433,7 @@ export function createSessionEngine(opts: CreateSessionEngineOptions): SessionEn
     cwd: opts.cwd,
     baseEnv: opts.baseEnv,
     spawn: opts.spawn,
+    sessionId: opts.sessionId,
     permissionMode: opts.permissionMode,
     effortLevel: opts.effortLevel,
     agent: opts.agent,
