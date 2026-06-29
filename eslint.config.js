@@ -9,7 +9,6 @@ export default [
     ignores: [
       "node_modules/",
       "dist/",
-      "src/tests/",
       "coverage/",
       "*.min.js",
       "*.config.js",
