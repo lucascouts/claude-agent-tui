@@ -35,6 +35,8 @@ import {
   CloseSessionResponse,
   DeleteSessionRequest,
   DeleteSessionResponse,
+  LogoutRequest,
+  LogoutResponse,
   TerminalHandle,
   TerminalOutputResponse,
   WriteTextFileRequest,
@@ -1540,6 +1542,20 @@ export class ClaudeAcpAgent implements Agent {
     throw new Error("Method not implemented.");
   }
 
+  /**
+   * ACP `logout` (acp-sdk 1.0.0, acp.d.ts:1646). Under the PTY engine the bridge
+   * authenticates lazily and only tracks an in-memory `gatewayAuthRequest`; the
+   * interactive `claude` TUI owns the on-disk credential lifecycle. So `logout`
+   * here drops the in-memory auth intent and re-offers a clean handshake on the
+   * next `initialize()` (authMethods are recomputed there, unconditioned by this
+   * field). It does NOT read/write/delete `~/.claude` (billing seam — story 062
+   * R2) and never bridges `/logout` to the PTY (R3). Idempotent with no prior
+   * authenticate() (R4); active sessions are untouched (R6).
+   */
+  async logout(_params: LogoutRequest): Promise<LogoutResponse | void> {
+    this.gatewayAuthRequest = undefined;
+  }
+
   async prompt(params: PromptRequest): Promise<PromptResponse> {
     const sessionRecord = this.sessions[params.sessionId];
     if (!sessionRecord) {
@@ -1749,6 +1765,8 @@ export class ClaudeAcpAgent implements Agent {
 
   /** Tear down all active sessions. Called when the ACP connection closes. */
   async dispose(): Promise<void> {
+    // Drop the in-memory auth intent on teardown (story 062 R7) — same clear as logout().
+    this.gatewayAuthRequest = undefined;
     await Promise.all(Object.keys(this.sessions).map((id) => this.teardownSession(id)));
   }
 
