@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.39.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.6.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.5.2...v0.6.0) (2026-06-29)
+
+
+### Features
+
+* **panel:** hybrid agent discovery — probe claude for canonical list + glob fallback ([29948ce](https://github.com/lucascouts/claude-agent-tui/commit/29948ce2fabad101eec0ea1bc84b8fe979be52a2))
+* **panel:** live /effort + pre-interaction fresh re-spawn for agent/mode + optimistic mode feedback ([fa0b6b5](https://github.com/lucascouts/claude-agent-tui/commit/fa0b6b56a029c23b5865d3162955b586af07f042))
+* **panel:** surface auto permission mode + realign model catalog to the original ([93e0d11](https://github.com/lucascouts/claude-agent-tui/commit/93e0d11beececd1a3e95a3f93db78f82f3b0a882))
+* **panel:** ultracode effort-selector entry — sentinel + Option A apply (story 060) ([1c36be7](https://github.com/lucascouts/claude-agent-tui/commit/1c36be7835ccad82bc604007ec412b5d92686caa))
+* **panel:** v0.52 parity — effort selector, agent picker, render fixes, title push ([b4e99d6](https://github.com/lucascouts/claude-agent-tui/commit/b4e99d6bea7486a52ff59cee23a19e9358a558b8))
+
+
+### Bug Fixes
+
+* **059:** claude-path tests→dist + SettingsManager fs.watch unref; devDeps v0.52 bump ([da5fd09](https://github.com/lucascouts/claude-agent-tui/commit/da5fd09df8ca6f4f446b3a772895e21860099da3))
+* **effort:** map ultracode sentinel to xhigh at the mode/agent re-spawn seam (R1.2) ([39c215d](https://github.com/lucascouts/claude-agent-tui/commit/39c215d332ec0f0acbfb3eb8648e24080ac18ed4))
+* **image:** satisfy eqeqeq in vision smoke + bind temp-image sink before promptToClaude ([266a777](https://github.com/lucascouts/claude-agent-tui/commit/266a777a7447a03ec4495b69b0275fe91e60905c))
+
 ## [0.5.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.5.1...v0.5.2) (2026-06-27)
 
 
