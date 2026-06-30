@@ -54,10 +54,21 @@ export interface ForwardedToolCall {
   agentType?: string;
 }
 
-/** The decider the server forwards each tool call to; returns the enforced `'allow'`/`'deny'`. */
+/** Story 064 — a deny that carries a custom `permissionDecisionReason` (e.g. the AskUserQuestion
+ *  anti-stall reason) instead of the {@link defaultDenyReason}. */
+export interface DenyWithReason {
+  decision: "deny";
+  reason: string;
+}
+
+/** The enforced outcome a decider returns: a plain allow/deny, or a deny carrying a custom reason.
+ *  Plain `"deny"` and {@link DenyWithReason} both intercept the tool; the latter just names a reason. */
+export type ToolDecision = "allow" | "deny" | DenyWithReason;
+
+/** The decider the server forwards each tool call to; returns the enforced {@link ToolDecision}. */
 export type ToolCallDecider = (
   call: ForwardedToolCall,
-) => Promise<"allow" | "deny"> | "allow" | "deny";
+) => Promise<ToolDecision> | ToolDecision;
 
 /** The running hook server handle. */
 export interface HookServer {
@@ -117,6 +128,14 @@ function writeDecision(res: ServerResponse, decision: HookResponse): void {
   res.end(json);
 }
 
+/** Map a decider's {@link ToolDecision} to the §9 hook body, honoring a {@link DenyWithReason}'s custom
+ *  reason (story 064). A plain allow/deny uses the default allow/deny body. */
+function toHookResponse(decision: ToolDecision, call: ForwardedToolCall): HookResponse {
+  if (decision === "allow") return allowDecision(call);
+  if (decision === "deny") return denyDecision(call);
+  return denyDecision(call, decision.reason);
+}
+
 /**
  * Parse a PreToolUse payload from raw JSON, normalizing to {@link ForwardedToolCall}. Returns null when
  * the body is unparseable OR lacks a `tool_use_id`/`tool_name` — the caller fails closed on null (a
@@ -159,7 +178,7 @@ async function decideWithTimeout(
   call: ForwardedToolCall,
   timeoutMs: number,
   onWarn?: (message: string) => void,
-): Promise<"allow" | "deny"> {
+): Promise<ToolDecision> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"deny">((resolve) => {
     timer = setTimeout(() => {
@@ -260,7 +279,7 @@ export function startHookServer(opts: StartHookServerOptions): Promise<HookServe
           return;
         }
         const decision = await decideWithTimeout(decider, call, deciderTimeoutMs, onWarn);
-        writeDecision(res, decision === "allow" ? allowDecision(call) : denyDecision(call));
+        writeDecision(res, toHookResponse(decision, call));
       } catch (err) {
         // Any unexpected handler error (body read failure, write failure) → fail closed.
         onWarn?.(

@@ -34,7 +34,13 @@ import * as path from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { findFreePort } from "../gate/port.js";
 import { injectHook, restore, type Backup } from "../gate/settings-writer.js";
-import { startHookServer, type ForwardedToolCall, type HookServer } from "./hook-server.js";
+import {
+  startHookServer,
+  type ForwardedToolCall,
+  type HookServer,
+  type ToolDecision,
+} from "./hook-server.js";
+import { askUserQuestionDenyReason, isAskUserQuestionTool } from "./deny.js";
 import {
   requestPermission,
   ToolUseCorrelator,
@@ -370,8 +376,17 @@ class SessionGateImpl implements SessionGate {
    * `tool_use.id` correlation → raise ACP `session/request_permission` (story 033, fail-closed) →
    * on `allow`, arm the #52822 native-prompt sweep. Every deny path is request-permission's own.
    */
-  private async decide(call: ForwardedToolCall): Promise<"allow" | "deny"> {
+  private async decide(call: ForwardedToolCall): Promise<ToolDecision> {
     if (this.torndown) return "deny"; // a hook racing teardown is never approved
+
+    // === Story 064 — AskUserQuestion deny-guard (anti-stall), BEFORE any mode auto-allow or ACP relay.
+    // AskUserQuestion renders an interactive multiple-choice picker bound to the hidden PTY's stdin.
+    // Over the bridge the Zed user can't see or answer it, so an allow (including the bypass/acceptEdits
+    // auto-allow below) would stall the turn until the watchdog fires. Deny it fail-closed with a clear
+    // reason so the model proceeds. Interim guard until story 065 relays it via ACP elicitation.
+    if (isAskUserQuestionTool(call.toolName)) {
+      return { decision: "deny", reason: askUserQuestionDenyReason() };
+    }
 
     // === Story 046 (R3) — honor the live permission mode BEFORE relaying to Zed. =================
     // The hook payload carries the current mode (probe-d confirmed `permission_mode` matches the

@@ -96,6 +96,29 @@ export function allowDecision(toolCall: DenyToolCall, reason?: string): HookResp
   };
 }
 
+/** Story 064 — the interactive tool the gate denies fail-closed over the Zed bridge (R1). */
+export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+
+/** True iff `toolName` is the AskUserQuestion interactive picker tool (exact, case-sensitive). */
+export function isAskUserQuestionTool(toolName: string): boolean {
+  return toolName === ASK_USER_QUESTION_TOOL;
+}
+
+/**
+ * Story 064 (R1.1) — the deny reason for AskUserQuestion over the Zed bridge. AskUserQuestion renders
+ * an interactive multiple-choice picker bound to the hidden PTY's stdin; the Zed user can neither see
+ * nor answer it, so allowing it would stall the turn until the watchdog fires. Deny it fail-closed with
+ * this reason so the model proceeds without it (interim until story 065 relays it via ACP elicitation).
+ * MUST name the tool and cite the bridge limitation (the body matches `/AskUserQuestion/` and `/bridge/i`).
+ */
+export function askUserQuestionDenyReason(): string {
+  return (
+    `${ASK_USER_QUESTION_TOOL} is not supported over the Zed bridge: its interactive multiple-choice ` +
+    `picker renders in a hidden PTY the user cannot see or answer, so the turn would stall. Denying it ` +
+    `fail-closed — continue without asking an interactive question.`
+  );
+}
+
 /**
  * Matcher-scoped deny predicate (R2.3 NUANCE): does this deny matcher target the given tool?
  *
