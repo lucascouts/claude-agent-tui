@@ -11,7 +11,7 @@
 // translation logic. Both passes delegate to the REUSED, byte-for-byte `toAcpNotifications`
 // (acp-agent.ts) — it is merely called on block SUBSETS and the convenience pass is wrapped. The
 // only NEW src is this file itself; it is deliberately NOT exported from lib.ts (whose surface is
-// frozen to upstream v0.39.0 and locked by test/lib-exports.test.ts) — the unit test imports it
+// frozen to upstream v0.53.0 and locked by test/lib-exports.test.ts) — the unit test imports it
 // directly from dist/besteffort.js. No existing translator is modified.
 //
 // BUILDING-BLOCK POSTURE: like story 016's `classifyEvent`, this gate currently has NO production

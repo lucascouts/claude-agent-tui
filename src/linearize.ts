@@ -360,7 +360,7 @@ export async function readOrderedMessages(
  * Exported (story 043 R2.1) so acp-agent.ts can reuse it as the PRODUCTION reduced base it wraps in
  * the diff-enriched reader when `liveDiff` is ON (it is the same reduced reader `readOrderedMessages`
  * already falls back to). linearize.ts is a fork module imported directly from ../dist/ — NOT via
- * lib.ts, whose public surface is frozen to upstream v0.39.0 — so this export is safe.
+ * lib.ts, whose public surface is frozen to upstream v0.53.0 — so this export is safe.
  */
 export async function defaultGetMessages(
   sessionId: string,

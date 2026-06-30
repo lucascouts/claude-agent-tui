@@ -12,7 +12,7 @@
 //
 // node:test runner: `node --experimental-strip-types --test test/usage-update-flag.test.ts`
 // (run `npm run build` first — both seams resolve against ../dist/*.js INTERNAL fork modules
-// imported directly, NOT via lib.ts whose public surface is frozen to upstream v0.39.0).
+// imported directly, NOT via lib.ts whose public surface is frozen to upstream v0.53.0).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

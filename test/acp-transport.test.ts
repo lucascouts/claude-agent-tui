@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// Story 011 / Task 1.1 — confirm the ACP transport reuses the upstream v0.39.0
+// Story 011 / Task 1.1 — confirm the ACP transport reuses the upstream v0.53.0
 // shape: `runAcp` wires `ndJsonStream(stdin/stdout)` + `AgentSideConnection`
 // with no engine handle threaded into the transport. (Story 038 added an OPTIONAL
 // `deps?: AgentDeps` config param to runAcp — usageUpdate resolved from env — passed

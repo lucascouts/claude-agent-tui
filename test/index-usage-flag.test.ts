@@ -6,7 +6,7 @@
 //
 // node:test runner: `node --experimental-strip-types --test test/index-usage-flag.test.ts`
 // (run `npm run build` first — the seam resolves against ../dist/usage-env.js, an INTERNAL fork
-// module imported directly, NOT via lib.ts whose public surface is frozen to upstream v0.39.0).
+// module imported directly, NOT via lib.ts whose public surface is frozen to upstream v0.53.0).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

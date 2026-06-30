@@ -10,5 +10,5 @@ This product is a derivative work of:
 
 The engine was rewritten to drive the Claude Code subscription TUI over a
 pseudo-terminal (PTY) instead of calling the Claude Agent SDK. See
-.fork-provenance.json (fork point: v0.39.0) and CHANGELOG.md for the scope
+.fork-provenance.json (fork point: v0.53.0) and CHANGELOG.md for the scope
 of modifications.

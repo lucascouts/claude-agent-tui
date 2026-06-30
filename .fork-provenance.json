@@ -2,8 +2,8 @@
   "url": "https://github.com/agentclientprotocol/claude-agent-acp.git",
   "org": "agentclientprotocol/claude-agent-acp",
   "redirectFrom": "zed-industries/claude-code-acp",
-  "tag": "v0.39.0",
-  "sha": "edde96ebafac2ea5d1c879c17459453472d82916",
+  "tag": "v0.53.0",
+  "sha": "47fee477096f9edd4aeb994679658fb0914cc0c0",
   "tagShaVerified": true,
   "upstreamDependencyKeys": ["@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "zod"],
   "externalRuntimeDeps": [
@@ -23,7 +23,7 @@
       "deferredTo": "story 025"
     }
   ],
-  "anchorRule": "anchor by symbol NAME, not line number — upstream line numbers are volatile (createSession ≈L1933/L2037, canUseTool ≈L1600/L1704, prompt ≈L732/L900)",
+  "anchorRule": "anchor by symbol NAME, not line number — upstream line numbers are volatile (across v0.39→v0.53 createSession moved ≈L1933→L3098, canUseTool ≈L1600→L2621, prompt ≈L732→L1034)",
   "modules": ["index.ts", "acp-agent.ts", "tools.ts", "settings.ts", "utils.ts", "lib.ts"],
   "symbolInventory": {
     "acp-agent.ts": [

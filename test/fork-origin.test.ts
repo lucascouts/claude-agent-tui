@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 
 // Durable provenance source. The upstream `.git` is removed at vendor time
 // (the fork is vendored into the project repo), so origin/tag/SHA can no longer
-// be read via `git describe` / `git rev-parse v0.39.0` in regression. Task 1
+// be read via `git describe` / `git rev-parse v0.53.0` in regression. Task 1
 // verifies those against the live upstream `.git` at vendor time and freezes the
 // result here. See FORK.md and the story 009 deviation register.
 const here = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ test("fork origin: records the redirect from the old zed-industries/claude-code-
   assert.equal(p.redirectFrom, "zed-industries/claude-code-acp");
 });
 
-test("fork origin: checked-out tag is v0.39.0 (R1.1)", () => {
+test("fork origin: checked-out tag is v0.53.0 (R1.1)", () => {
   const p = readProvenance();
-  assert.equal(p.tag, "v0.39.0");
+  assert.equal(p.tag, "v0.53.0");
 });

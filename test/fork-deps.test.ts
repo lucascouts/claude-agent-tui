@@ -21,24 +21,24 @@ test("fork deps: @agentclientprotocol/sdk pinned exactly to 1.0.0, no range (R2.
   assert.doesNotMatch(deps["@agentclientprotocol/sdk"] ?? "", /[\^~]/);
 });
 
-test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.191, no range (R2.2)", () => {
-  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.191");
+test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.195, no range (R2.2)", () => {
+  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.195");
   assert.doesNotMatch(deps["@anthropic-ai/claude-agent-sdk"] ?? "", /[\^~]/);
 });
 
-// --- Task 2.2: node-pty is the only extra runtime dep vs upstream v0.39.0 ---
+// --- Task 2.2: node-pty is the only extra runtime dep vs upstream v0.53.0 ---
 
 test("fork deps: node-pty present in dependencies, no range (R2.3)", () => {
   assert.ok("node-pty" in deps, "node-pty must be a runtime dependency");
   assert.doesNotMatch(deps["node-pty"] ?? "", /[\^~]/);
 });
 
-test("fork deps: node-pty is the ONLY dependency key added vs upstream v0.39.0 (R2.3)", () => {
+test("fork deps: node-pty is the ONLY dependency key added vs upstream v0.53.0 (R2.3)", () => {
   const provenance = readJson(".fork-provenance.json");
   const upstreamKeys = provenance.upstreamDependencyKeys as string[] | undefined;
   assert.ok(
     Array.isArray(upstreamKeys) && upstreamKeys.length > 0,
-    "the upstream v0.39.0 dependency-key baseline must be frozen in provenance",
+    "the upstream v0.53.0 dependency-key baseline must be frozen in provenance",
   );
   const current = new Set(Object.keys(deps));
   const upstream = new Set(upstreamKeys);

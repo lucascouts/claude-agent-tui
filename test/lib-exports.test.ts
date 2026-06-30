@@ -7,7 +7,7 @@ import * as lib from "../dist/lib.js";
 
 // Story 011 / Task 4.2 — pin the `lib.ts` public export surface so the fork cannot
 // silently add, remove, rename, or change the type of a public export relative to
-// frozen upstream v0.39.0 (§3 module lib.ts = API pública).
+// frozen upstream v0.53.0 (§3 module lib.ts = API pública).
 
 const here = dirname(fileURLToPath(import.meta.url));
 const forkRoot = join(here, "..");
@@ -63,5 +63,5 @@ test("lib exports: source declares exactly the frozen value+type export set (loc
     }
   }
   const expected = [...EXPECTED_VALUE_EXPORTS, ...EXPECTED_TYPE_EXPORTS].sort();
-  assert.deepEqual([...names].sort(), expected, "lib.ts export identifier set drifted from frozen v0.39.0");
+  assert.deepEqual([...names].sort(), expected, "lib.ts export identifier set drifted from frozen v0.53.0");
 });

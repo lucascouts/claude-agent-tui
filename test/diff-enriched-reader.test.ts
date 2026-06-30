@@ -6,7 +6,7 @@
 // transcript cannot be read/parsed (R1.3) and NEVER a fabricated patch when `toolUseResult` is absent.
 //
 // The unit under test is resolved against ../dist/diff-enriched-reader.js — an INTERNAL fork module
-// imported DIRECTLY, NOT via lib.ts (whose public surface is frozen to upstream v0.39.0). Run with
+// imported DIRECTLY, NOT via lib.ts (whose public surface is frozen to upstream v0.53.0). Run with
 // `npm run build` first, then `node --experimental-strip-types --test test/diff-enriched-reader.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";

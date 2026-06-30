@@ -12,7 +12,7 @@
 // node:test runner: `node --experimental-strip-types --test test/translate-besteffort.test.ts`
 // (run `npm run build` first — the gate resolves against ../dist/besteffort.js, an INTERNAL fork
 // module imported directly like jsonl/event-switch/linearize — NOT via lib.ts, whose public export
-// surface is frozen to upstream v0.39.0 and locked by lib-exports.test.ts).
+// surface is frozen to upstream v0.53.0 and locked by lib-exports.test.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

@@ -17,12 +17,12 @@ test("fork sha: captured SHA is a 40-char lowercase hex string (R1.1)", () => {
   assert.match(String(p.sha), /^[0-9a-f]{40}$/);
 });
 
-test("fork sha: vendor-time verified the SHA equals the v0.39.0 tag (R1.1)", () => {
+test("fork sha: vendor-time verified the SHA equals the v0.53.0 tag (R1.1)", () => {
   const p = readProvenance();
   // The upstream `.git` is removed when the fork is vendored into the project
-  // repo, so `git rev-parse v0.39.0` cannot be re-run in regression. Task 1.2
+  // repo, so `git rev-parse v0.53.0` cannot be re-run in regression. Task 1.2
   // performs that equality check against the live upstream `.git` at vendor time
   // and records the outcome as `tagShaVerified`. This pins the intent of the
-  // original assertion (`git rev-parse v0.39.0` equals the captured SHA) durably.
+  // original assertion (`git rev-parse v0.53.0` equals the captured SHA) durably.
   assert.equal(p.tagShaVerified, true);
 });

@@ -27,7 +27,7 @@
 // POSTURE: READ-ONLY (the module only INSPECTS the payload, never mutates it), dependency-free
 // (no `node:` builtins needed), and adds NO custom JSONL parser and NO patch-apply parser. It is
 // deliberately self-contained and NOT exported from lib.ts (whose surface is frozen to upstream
-// v0.39.0 and locked by test/lib-exports.test.ts) — its unit tests import it directly from
+// v0.53.0 and locked by test/lib-exports.test.ts) — its unit tests import it directly from
 // dist/diff-source.js (and the reused translator from dist/tools.js).
 //
 // TOLERANCE (skip-and-log, §6): an unknown or odd shape must NEVER throw and must NEVER be emitted as
