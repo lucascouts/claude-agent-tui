@@ -61,8 +61,8 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "default",
     displayName: "Default (recommended)",
-    description:
-      "Use the model the claude TUI is configured with (safe fallback); supports reasoning effort.",
+    // Story 069 (R3): `default` resolves to the recommended Opus, so it carries the Opus description.
+    description: "Best for everyday, complex tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -70,7 +70,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "opus",
     displayName: "Opus",
-    description: "Claude Opus — highest capability; supports reasoning effort.",
+    description: "Best for everyday, complex tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -78,7 +78,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "sonnet",
     displayName: "Sonnet",
-    description: "Claude Sonnet — balanced speed and capability; supports reasoning effort.",
+    description: "Efficient for routine tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -86,8 +86,8 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "sonnet[1m]",
     displayName: "Sonnet (1M context)",
-    description:
-      "Claude Sonnet with a 1M-token context window; draws from usage credits; supports reasoning effort.",
+    // Story 069 (R3): fork-only 1M variant — the Sonnet description plus its 1M-window note.
+    description: "Efficient for routine tasks, with a 1M-token context window",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -95,12 +95,12 @@ export const MODEL_CATALOG: ModelInfo[] = [
   {
     value: "haiku",
     displayName: "Haiku",
-    description: "Claude Haiku — fastest and most economical; no reasoning effort levels.",
+    description: "Fastest for quick answers",
   },
   {
     value: "opusplan",
-    displayName: "Opus Plan",
-    description: "Opus while planning, Sonnet for execution (plan-mode workflow; fork extra).",
+    displayName: "Opus Plan Mode",
+    description: "Use Opus in plan mode, Sonnet otherwise",
   },
 ];
 
@@ -111,18 +111,37 @@ export const MODEL_CATALOG: ModelInfo[] = [
  * `inferContextWindowFromModel` (acp-agent.ts) consults BEFORE the `\b1m\b` regex fallback — the bug it
  * fixes is `opus` having wrongly reported 200K (the regex only ever matched the literal `1m` token).
  *
- * `default` and `opusplan` are a documented CONSERVATIVE 200K placeholder (R2): `default` is whatever the
- * TUI is configured with (unknown here) and `opusplan` mixes Opus-plan with Sonnet-exec — both await a
- * live probe (story 068 R2). Keys MIRROR `MODEL_CATALOG` `value`s; the drift guard lives in the test
- * (068 anti-drift: every catalog value must have an explicit entry here).
+ * Story 069 (R2): `default` and `opusplan` seed to 1M — `default` is the recommended Opus (the claude TUI's
+ * `/model default` resolves to `claude-opus-4-8[1m]`, a 1M model) and `opusplan` plans with Opus. This is
+ * only the PRE-FIRST-TURN seed: once a turn arrives, `inferContextWindowFromModelId` (story 069)
+ * AUTHORITATIVELY refines the window from the transcript's real `model`. Keys MIRROR `MODEL_CATALOG`
+ * `value`s; the drift guard lives in the test (068 anti-drift: every catalog value has an explicit entry).
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  default: 200_000,
+  default: 1_000_000,
   opus: 1_000_000,
   sonnet: 200_000,
   "sonnet[1m]": 1_000_000,
   haiku: 200_000,
-  opusplan: 200_000,
+  opusplan: 1_000_000,
+};
+
+/**
+ * Story 069 (R1.1) — the REAL context window per concrete model ID, mirroring the claude CLI's
+ * `context:{window}` table. Used to AUTHORITATIVELY refine the window from a turn's actual `model`
+ * (the JSONL `model` field), correcting the alias seed. Opus is NOT uniform: 4.6 = 200K, 4.7+ = 1M.
+ * Dated snapshots / future versions are covered by the family+version heuristic in
+ * `inferContextWindowFromModelId`; this table is the exact-ID source of truth for today's gateway IDs.
+ */
+export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
+  "claude-opus-4-8": 1_000_000,
+  "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-6": 200_000,
+  "claude-fable-5": 1_000_000,
+  "claude-sonnet-4-6": 200_000,
+  "claude-sonnet-4-5-20250929": 200_000,
+  "claude-sonnet-4-20250514": 200_000,
+  "claude-haiku-4-5": 200_000,
 };
 
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */

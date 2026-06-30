@@ -71,9 +71,25 @@ test("068 R1.2: fully unknown → null; call site applies DEFAULT_CONTEXT_WINDOW
   assert.equal(resolve("totally-unknown-model"), 200_000);
 });
 
-test("068 R2: default + opusplan → 200K conservative (TUI-config-dependent / mixed)", () => {
-  assert.equal(infer("default"), 200_000);
-  assert.equal(infer("opusplan"), 200_000);
+test("069 R2: default + opusplan seeds → 1M (default = recommended Opus; opusplan plans with Opus)", () => {
+  assert.equal(infer("default"), 1_000_000);
+  assert.equal(infer("opusplan"), 1_000_000);
+});
+
+test("069 R3: MODEL_CATALOG descriptions match the original /model picker verbatim", () => {
+  const byValue: Record<string, { displayName?: string; description?: string }> = {};
+  for (const m of catalog.MODEL_CATALOG) byValue[m.value] = m;
+  assert.equal(byValue.opus.description, "Best for everyday, complex tasks");
+  assert.equal(byValue.sonnet.description, "Efficient for routine tasks");
+  assert.equal(byValue.haiku.description, "Fastest for quick answers");
+  assert.equal(byValue.opusplan.displayName, "Opus Plan Mode");
+  assert.equal(byValue.opusplan.description, "Use Opus in plan mode, Sonnet otherwise");
+  // fork-only items: `default` carries the Opus text (default = recommended Opus); `sonnet[1m]` = Sonnet + 1M note.
+  assert.equal(byValue.default.description, "Best for everyday, complex tasks");
+  assert.equal(
+    byValue["sonnet[1m]"].description,
+    "Efficient for routine tasks, with a 1M-token context window",
+  );
 });
 
 test("068 anti-drift: every MODEL_CATALOG value has an explicit MODEL_CONTEXT_WINDOWS entry", () => {
@@ -83,4 +99,57 @@ test("068 anti-drift: every MODEL_CATALOG value has an explicit MODEL_CONTEXT_WI
       `catalog alias '${m.value}' must have an explicit MODEL_CONTEXT_WINDOWS entry (drift guard)`,
     );
   }
+});
+
+// --- Story 069: authoritative window from the turn's REAL model ID (the transcript `model` field) ---
+// The alias seed (068) is the pre-first-turn guess; once a turn carries `model:"claude-opus-4-8"` the
+// pump refines the window from this resolver. Windows mirror the claude CLI's `context:{window}` table:
+// Opus is NOT uniform (4-6=200K, 4-7/4-8=1M); sonnet/haiku=200K; fable-5=1M.
+const inferId = (id: unknown): number | null => acp.inferContextWindowFromModelId(id as string);
+
+test("069 surface: inferContextWindowFromModelId is exported", () => {
+  assert.equal(
+    typeof acp.inferContextWindowFromModelId,
+    "function",
+    "inferContextWindowFromModelId must be exported from acp-agent.ts",
+  );
+});
+
+test("069 R1.1: opus-4-8 / opus-4-7 → 1M (current Opus is native 1M)", () => {
+  assert.equal(inferId("claude-opus-4-8"), 1_000_000);
+  assert.equal(inferId("claude-opus-4-7"), 1_000_000);
+});
+
+test("069 R1.1: opus-4-6 → 200K (Opus is NOT uniformly 1M — the key finding)", () => {
+  assert.equal(inferId("claude-opus-4-6"), 200_000);
+});
+
+test("069 R1.1: sonnet IDs → 200K", () => {
+  assert.equal(inferId("claude-sonnet-4-6"), 200_000);
+  assert.equal(inferId("claude-sonnet-4-5-20250929"), 200_000);
+});
+
+test("069 R1.1: fable-5 → 1M; haiku → 200K", () => {
+  assert.equal(inferId("claude-fable-5"), 1_000_000);
+  assert.equal(inferId("claude-haiku-4-5"), 200_000);
+});
+
+test("069 R1.2: unknown ID carrying a 1m token → 1M (regex fallback)", () => {
+  assert.equal(inferId("claude-future-x-1m"), 1_000_000);
+});
+
+test("069 R1.2: fully unknown ID → null (caller keeps the current value)", () => {
+  assert.equal(inferId("gpt-5-turbo"), null);
+});
+
+test("069 R1.2: explicit [1m] suffix wins over the family heuristic → 1M", () => {
+  // `/model default` resolves to `claude-opus-4-8[1m]` live; Sonnet long-context is `…[1m]` too.
+  assert.equal(inferId("claude-opus-4-8[1m]"), 1_000_000);
+  assert.equal(inferId("claude-sonnet-4-5-20250929[1m]"), 1_000_000);
+});
+
+test("069 R1.3: missing / non-string model → null (no refine on user rows)", () => {
+  assert.equal(inferId(undefined), null);
+  assert.equal(inferId(""), null);
+  assert.equal(inferId(123), null);
 });

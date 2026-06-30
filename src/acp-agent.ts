@@ -118,6 +118,7 @@ import { sendPrompt } from "./engine-pty.js";
 import {
   MODEL_CATALOG,
   MODEL_CONTEXT_WINDOWS,
+  MODEL_ID_CONTEXT_WINDOWS,
   DEFAULT_MODEL_INFO,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
@@ -2443,6 +2444,13 @@ export class ClaudeAcpAgent implements Agent {
     // in pumpUpdates, so the replay-only load never emitted it).
     if (session && !session.usageDisabled) {
       const carrier = (turn.message as { message?: unknown }).message ?? {};
+      // Story 069 (R1) — refine the window from the turn's REAL model (the JSONL `model`), authoritatively
+      // correcting the alias seed (e.g. default → claude-opus-4-8[1m] → 1M). A missing / non-string model or
+      // an unknown id leaves the current value unchanged (R1.3 — never overwrite with null).
+      const realModel = (carrier as { model?: unknown }).model;
+      if (typeof realModel === "string" && realModel.length > 0) {
+        session.contextWindowSize = inferContextWindowFromModelId(realModel) ?? session.contextWindowSize;
+      }
       for (const usageUpdate of usageUpdatesFor(carrier as unknown as UsageCarrier, {
         usageUpdate: this.usageUpdate,
         contextWindowSize: session.contextWindowSize,
@@ -4060,4 +4068,28 @@ export function inferContextWindowFromModel(model: string): number | null {
   if (mapped !== undefined) return mapped; // exact alias hit (!== undefined, NOT truthiness)
   if (/\b1m\b/i.test(model)) return 1_000_000; // unknown alias that still encodes a 1m token
   return null; // caller applies ?? DEFAULT_CONTEXT_WINDOW
+}
+
+/** Story 069 (R1) — AUTHORITATIVE context window from a turn's REAL model ID (the JSONL `model`
+ *  field), used by the pump to refine the alias seed once the model is known. Exact-ID lookup first
+ *  (MODEL_ID_CONTEXT_WINDOWS), then a family+version heuristic for dated snapshots / future variants
+ *  (Opus is NOT uniform: 4.6 and earlier = 200K, 4.7+ = 1M; sonnet/haiku = 200K; fable = 1M), then a
+ *  `\b1m\b` suffix, then null (R1.3: a missing / non-string id never refines). */
+export function inferContextWindowFromModelId(id: string): number | null {
+  if (typeof id !== "string" || id.length === 0) return null;
+  const exact = MODEL_ID_CONTEXT_WINDOWS[id];
+  if (exact !== undefined) return exact;
+  // An explicit long-context `[1m]`/`-1m` suffix wins over the family heuristic
+  // (`claude-sonnet-…[1m]` = 1M, not 200K; `/model default` resolves to `claude-opus-4-8[1m]`).
+  if (/\b1m\b/i.test(id)) return 1_000_000;
+  const opus = id.match(/claude-opus-(\d+)-(\d+)/);
+  if (opus) {
+    const major = Number(opus[1]);
+    const minor = Number(opus[2]);
+    return major > 4 || (major === 4 && minor >= 7) ? 1_000_000 : 200_000;
+  }
+  if (/claude-fable/.test(id)) return 1_000_000;
+  if (/claude-sonnet/.test(id)) return 200_000;
+  if (/claude-haiku/.test(id)) return 200_000;
+  return null;
 }
