@@ -117,6 +117,7 @@ import type { DetectorSchedule, EndOfTurnDetector } from "./end-of-turn.js";
 import { sendPrompt } from "./engine-pty.js";
 import {
   MODEL_CATALOG,
+  MODEL_CONTEXT_WINDOWS,
   DEFAULT_MODEL_INFO,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
@@ -168,7 +169,7 @@ type AccumulatedUsage = {
   cachedWriteTokens: number;
 };
 
-const DEFAULT_CONTEXT_WINDOW = 200000;
+export const DEFAULT_CONTEXT_WINDOW = 200000;
 
 type Session = {
   // === SEAM(023) Group 1: PTY-backed session record (migrated OFF the SDK Query, story C9). ===
@@ -247,11 +248,14 @@ type Session = {
    */
   agents?: AgentCatalogEntry[];
   configOptions: SessionConfigOption[];
-  /** Context window size of the last top-level assistant model, carried across
-   *  prompts so mid-stream usage_update notifications report a correct `size`
-   *  before the turn's first result message arrives. Defaults to
-   *  DEFAULT_CONTEXT_WINDOW, refreshed from each result's modelUsage, and
-   *  invalidated when the user switches the session's model. */
+  /** Context window size for the session, carried across prompts so mid-stream
+   *  usage_update notifications report a correct `size` before the turn's first
+   *  result message arrives. Seeded by `inferContextWindowFromModel` (the static
+   *  `MODEL_CONTEXT_WINDOWS` curation) and re-resolved when the user switches the
+   *  session's model. NOTE (story 068): there is NO `result.modelUsage` refresh —
+   *  the JSONL `usage` block carries only token counts, never a window; the window
+   *  comes from static curation (the Models API `max_input_tokens` is the real
+   *  authority, which this PTY/JSONL fork does not call). */
   contextWindowSize: number;
   /** Accumulated task list for the session, keyed by task ID. Task IDs are
    *  per-session, so this state must not be shared across sessions. */
@@ -4036,12 +4040,24 @@ export function runAcp(deps?: AgentDeps) {
   return { connection, agent };
 }
 
-/** Best-effort first guess of a model's context window from its ID, used only
- *  until a `result` message arrives with the authoritative `modelUsage` value.
- *  Anthropic 1M-context variants encode "1m" as a distinct token in the SDK
- *  model ID (e.g., "claude-opus-4-6-1m"), which `\b1m\b` catches without also
- *  matching things like "10m" or embedded substrings. */
-function inferContextWindowFromModel(model: string): number | null {
-  if (/\b1m\b/i.test(model)) return 1_000_000;
-  return null;
+/** Resolve a model alias's context window (the usage_update `size` denominator).
+ *  NOTE (story 068): there is NO `result.modelUsage` window to refresh from — the
+ *  JSONL `usage` carries only token counts; the window comes from static curation
+ *  (the Models API `max_input_tokens` is the real authority, which this fork does
+ *  not call), as detailed below.
+ *
+ *  Story 068 (R1, R1.1, R1.2): consults the static {@link MODEL_CONTEXT_WINDOWS}
+ *  alias→window map FIRST (an exact catalog-`value` hit — `opus`=1M, `sonnet`=200K,
+ *  `sonnet[1m]`=1M, `haiku`=200K, `default`/`opusplan`=200K conservative). This
+ *  fixes `opus` having wrongly reported 200K. An alias absent from the map then
+ *  falls back to the legacy `\b1m\b` inference: Anthropic 1M-context variants
+ *  encode "1m" as a distinct token in the SDK model ID (e.g., "claude-opus-4-6-1m"),
+ *  which `\b1m\b` catches without also matching "10m" or embedded substrings.
+ *  `null` (fully unknown) is intentional — the two call sites apply
+ *  `?? DEFAULT_CONTEXT_WINDOW`. */
+export function inferContextWindowFromModel(model: string): number | null {
+  const mapped = MODEL_CONTEXT_WINDOWS[model];
+  if (mapped !== undefined) return mapped; // exact alias hit (!== undefined, NOT truthiness)
+  if (/\b1m\b/i.test(model)) return 1_000_000; // unknown alias that still encodes a 1m token
+  return null; // caller applies ?? DEFAULT_CONTEXT_WINDOW
 }

@@ -104,5 +104,26 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 ];
 
+/**
+ * Story 068 (R1, R1.1, R2) — the REAL per-alias context window, keyed by the EXACT {@link MODEL_CATALOG}
+ * `value`. These windows are NOT uniform: `opus` is natively 1M, `sonnet`/`haiku` are 200K, and
+ * `sonnet[1m]` is the explicit 1M variant. This map is the single source of truth that
+ * `inferContextWindowFromModel` (acp-agent.ts) consults BEFORE the `\b1m\b` regex fallback — the bug it
+ * fixes is `opus` having wrongly reported 200K (the regex only ever matched the literal `1m` token).
+ *
+ * `default` and `opusplan` are a documented CONSERVATIVE 200K placeholder (R2): `default` is whatever the
+ * TUI is configured with (unknown here) and `opusplan` mixes Opus-plan with Sonnet-exec — both await a
+ * live probe (story 068 R2). Keys MIRROR `MODEL_CATALOG` `value`s; the drift guard lives in the test
+ * (068 anti-drift: every catalog value must have an explicit entry here).
+ */
+export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  default: 200_000,
+  opus: 1_000_000,
+  sonnet: 200_000,
+  "sonnet[1m]": 1_000_000,
+  haiku: 200_000,
+  opusplan: 200_000,
+};
+
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */
 export const DEFAULT_MODEL_INFO: ModelInfo = MODEL_CATALOG[0];
