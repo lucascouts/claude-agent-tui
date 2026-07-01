@@ -124,9 +124,17 @@ test("069 R1.1: opus-4-6 → 200K (Opus is NOT uniformly 1M — the key finding)
   assert.equal(inferId("claude-opus-4-6"), 200_000);
 });
 
-test("069 R1.1: sonnet IDs → 200K", () => {
+test("069 R1.1: sonnet 4.x IDs → 200K", () => {
   assert.equal(inferId("claude-sonnet-4-6"), 200_000);
   assert.equal(inferId("claude-sonnet-4-5-20250929"), 200_000);
+});
+
+test("071 R1.1: sonnet-5 → 1M (Sonnet 5 is native 1M — no smaller context variant)", () => {
+  // Sonnet is NOT uniform across generations (mirrors the Opus 4-6 vs 4-7/4-8 split): the
+  // subscription CLI serves Sonnet 4.x at 200K but Sonnet 5 at 1M by default. The family
+  // heuristic must be version-aware, not a blanket `claude-sonnet → 200K`.
+  assert.equal(inferId("claude-sonnet-5"), 1_000_000);
+  assert.equal(inferId("claude-sonnet-5-20260115"), 1_000_000);
 });
 
 test("069 R1.1: fable-5 → 1M; haiku → 200K", () => {

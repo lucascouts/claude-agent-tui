@@ -138,6 +138,7 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 200_000,
   "claude-fable-5": 1_000_000,
+  "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 200_000,
   "claude-sonnet-4-5-20250929": 200_000,
   "claude-sonnet-4-20250514": 200_000,

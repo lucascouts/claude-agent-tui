@@ -4128,7 +4128,8 @@ export function inferContextWindowFromModel(model: string): number | null {
 /** Story 069 (R1) — AUTHORITATIVE context window from a turn's REAL model ID (the JSONL `model`
  *  field), used by the pump to refine the alias seed once the model is known. Exact-ID lookup first
  *  (MODEL_ID_CONTEXT_WINDOWS), then a family+version heuristic for dated snapshots / future variants
- *  (Opus is NOT uniform: 4.6 and earlier = 200K, 4.7+ = 1M; sonnet/haiku = 200K; fable = 1M), then a
+ *  (Opus is NOT uniform: 4.6 and earlier = 200K, 4.7+ = 1M; Sonnet 4.x = 200K but Sonnet 5+ = 1M;
+ *  haiku = 200K; fable = 1M — story 071), then a
  *  `\b1m\b` suffix, then null (R1.3: a missing / non-string id never refines). */
 export function inferContextWindowFromModelId(id: string): number | null {
   if (typeof id !== "string" || id.length === 0) return null;
@@ -4144,7 +4145,11 @@ export function inferContextWindowFromModelId(id: string): number | null {
     return major > 4 || (major === 4 && minor >= 7) ? 1_000_000 : 200_000;
   }
   if (/claude-fable/.test(id)) return 1_000_000;
-  if (/claude-sonnet/.test(id)) return 200_000;
+  // Sonnet is NOT uniform across generations (story 071): the subscription CLI serves Sonnet 4.x
+  // at 200K but Sonnet 5+ natively at 1M (Sonnet 5 has no smaller context variant). Version-aware,
+  // like the Opus 4-6 vs 4-7/4-8 split above; dated snapshots (`claude-sonnet-5-<date>`) match too.
+  const sonnet = id.match(/claude-sonnet-(\d+)/);
+  if (sonnet) return Number(sonnet[1]) >= 5 ? 1_000_000 : 200_000;
   if (/claude-haiku/.test(id)) return 200_000;
   return null;
 }
