@@ -46,6 +46,13 @@ import {
   ToolUseCorrelator,
   type PermissionClient,
 } from "./request-permission.js";
+import {
+  buildElicitationRequest,
+  mapOutcomeToDecision,
+  requestElicitation,
+  type AskUserQuestionInput,
+  type ElicitationClient,
+} from "./elicitation-bridge.js";
 import { clearNativePrompt, type PtyWriter, type Schedule } from "./allow-inject.js";
 
 /**
@@ -140,12 +147,33 @@ export interface GatePty extends PtyWriter {
   onData?(cb: (data: string) => void): { dispose(): void };
 }
 
+/**
+ * Story 065 — the default hard upper bound (ms) on the AskUserQuestion elicitation round-trip. Generous
+ * (a human may take minutes to answer) but DELIBERATELY BELOW the hook-server
+ * {@link import("./hook-server.js").DEFAULT_DECIDER_TIMEOUT_MS} (600_000), so the bridge times out FIRST
+ * with a legible fail-closed reason rather than the decider being killed out from under it. Injectable
+ * via {@link SessionGateOptions.elicitationTimeoutMs} so offline tests use a small value.
+ */
+export const DEFAULT_ELICITATION_TIMEOUT_MS = 300_000;
+
 /** Options for {@link setupSessionGate}. Timing knobs are injectable for offline tests. */
 export interface SessionGateOptions {
-  /** The ACP client surface (`AgentSideConnection` satisfies it: `requestPermission(params)`). */
-  client: PermissionClient;
+  /** The ACP client surface. `AgentSideConnection` satisfies BOTH `requestPermission(params)`
+   *  (the story-033 relay) AND `unstable_createElicitation(params)` (the story-065 elicitation
+   *  bridge), so the field carries both capabilities. */
+  client: PermissionClient & ElicitationClient;
   /** Diagnostics sink for every fail-closed / stuck-prompt warning (production: logger.error). */
   onWarn?: (message: string) => void;
+  /**
+   * Story 065 (R1/R3) — whether the connected ACP client negotiated the elicitation `form` capability
+   * (`clientCapabilities.elicitation.form`). When true, AskUserQuestion is driven through a real ACP
+   * form elicitation ({@link SessionGateImpl.decideElicitation}); when false/omitted it DEGRADES to the
+   * story-064 fail-closed deny-guard. Defaults to false when read, so an existing gate/064 test that
+   * omits it keeps the degrade behavior (load-bearing — do NOT make required). */
+  clientSupportsElicitationForm?: boolean;
+  /** Story 065 — hard upper bound (ms) on the AskUserQuestion elicitation round-trip; default
+   *  {@link DEFAULT_ELICITATION_TIMEOUT_MS}. Injectable so offline tests use a small value. */
+  elicitationTimeoutMs?: number;
   /** Injectable timer seam (same discipline as allow-inject/end-of-turn). Default: setTimeout. */
   schedule?: Schedule;
   /** Directory for the per-session scratch settings file. Default: `os.tmpdir()`. */
@@ -226,6 +254,46 @@ export interface SessionGate {
 const defaultSchedule: Schedule = (fn, ms) => {
   setTimeout(fn, ms);
 };
+
+/**
+ * Story 065 — STRUCTURAL guard that a hook payload's `tool_input` is a usable {@link AskUserQuestionInput}:
+ * an object carrying a NON-EMPTY `questions` array, EACH question being an object with a `header` string
+ * and a NON-EMPTY `options` array of `{ label: string }`. The runtime zod validators are not importable
+ * across the SDK package `exports` map, and the hook payload's `tool_input` is `unknown`, so this narrows
+ * before the bridge builder projects it into a form (an empty/garbage form would otherwise reach the
+ * client, and a per-question shape the builder walks — `q.options.map(...)`, `q.header` — would otherwise
+ * throw).
+ *
+ * Story 065 / task 4.1 (R4) — the per-question `options`/`header` validation is a BELT-AND-SUSPENDERS
+ * addition: {@link SessionGateImpl.decideElicitation} now also wraps the build in a try/catch (the
+ * mandatory total-function guarantee), so this guard's job is only to fail closed to the story-064 deny
+ * EARLY (with a "malformed tool_input" reason) rather than relying on the catch. Both together mean a
+ * malformed per-question input is a legible dismissal, never a crash and never an approve.
+ */
+function isAskUserQuestionInput(input: unknown): input is AskUserQuestionInput {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    !("questions" in input) ||
+    !Array.isArray((input as { questions: unknown }).questions)
+  ) {
+    return false;
+  }
+  const questions = (input as { questions: unknown[] }).questions;
+  if (questions.length === 0) return false;
+  return questions.every((q) => {
+    if (typeof q !== "object" || q === null) return false;
+    const question = q as { header?: unknown; options?: unknown };
+    if (typeof question.header !== "string") return false;
+    if (!Array.isArray(question.options) || question.options.length === 0) return false;
+    return question.options.every(
+      (o) =>
+        typeof o === "object" &&
+        o !== null &&
+        typeof (o as { label?: unknown }).label === "string",
+    );
+  });
+}
 
 /** Internal mutable state of one session's gate. */
 class SessionGateImpl implements SessionGate {
@@ -379,13 +447,21 @@ class SessionGateImpl implements SessionGate {
   private async decide(call: ForwardedToolCall): Promise<ToolDecision> {
     if (this.torndown) return "deny"; // a hook racing teardown is never approved
 
-    // === Story 064 — AskUserQuestion deny-guard (anti-stall), BEFORE any mode auto-allow or ACP relay.
+    // === Story 064/065 — AskUserQuestion handling, BEFORE any mode auto-allow or ACP relay. =========
     // AskUserQuestion renders an interactive multiple-choice picker bound to the hidden PTY's stdin.
     // Over the bridge the Zed user can't see or answer it, so an allow (including the bypass/acceptEdits
-    // auto-allow below) would stall the turn until the watchdog fires. Deny it fail-closed with a clear
-    // reason so the model proceeds. Interim guard until story 065 relays it via ACP elicitation.
+    // auto-allow below) would stall the turn until the watchdog fires. This branch stays FIRST (after the
+    // torndown check) so AskUserQuestion is always intercepted regardless of permission mode.
+    //
+    // Story 065 (R1): when the client negotiated the elicitation `form` capability, drive a REAL ACP form
+    // elicitation and carry the answer back in a deny reason (a PreToolUse hook cannot synthesize a native
+    // tool_result — the tool is ALWAYS denied at the wire). Story 065 (R3): otherwise DEGRADE to the
+    // story-064 fail-closed deny-guard so the model proceeds without stalling.
     if (isAskUserQuestionTool(call.toolName)) {
-      return { decision: "deny", reason: askUserQuestionDenyReason() };
+      if (this.opts.clientSupportsElicitationForm) {
+        return await this.decideElicitation(call);
+      }
+      return { decision: "deny", reason: askUserQuestionDenyReason() }; // R3 degrade
     }
 
     // === Story 046 (R3) — honor the live permission mode BEFORE relaying to Zed. =================
@@ -492,6 +568,73 @@ class SessionGateImpl implements SessionGate {
         stopHeartbeat();
       }
     });
+  }
+
+  /**
+   * Story 065 (R1, R2.1, R2.2) — drive an AskUserQuestion via a REAL ACP form elicitation and map the
+   * user's outcome back to a gate decision. ALWAYS returns a `deny`+reason (a PreToolUse hook cannot
+   * synthesize a native tool_result): on accept the reason CARRIES the answer (R2.1); on
+   * decline/cancel/timeout/transport-error the reason reads as a dismissal (R2.2). Reached ONLY when the
+   * client negotiated the elicitation `form` capability (guarded in {@link decide}).
+   *
+   * FAIL CLOSED (mirrors the whole gate's posture): an elicitation is SESSION-SCOPED, so with no bound
+   * ACP session id (nor a payload fallback) we CANNOT raise one → fall back to the story-064 deny. A
+   * structurally malformed `tool_input` (not an object with a non-empty `questions` array) likewise falls
+   * back — the bridge builder would otherwise project an empty/garbage form. Both are dismissals, never
+   * an accept.
+   *
+   * The turn is BLOCKED awaiting the user exactly like the requestPermission relay, so the end-of-turn
+   * watchdog is re-armed via {@link startPermissionHeartbeat} for as long as the elicitation is open
+   * (always cleared in `finally`). The round-trip itself is bounded + fail-closed inside
+   * {@link requestElicitation} (it never throws and never hangs past the timeout).
+   */
+  private async decideElicitation(call: ForwardedToolCall): Promise<ToolDecision> {
+    const sessionId = this.sessionId ?? call.sessionId;
+    if (!sessionId) {
+      this.warn(
+        `[gate elicitation] FAIL CLOSED: AskUserQuestion for tool_use ${call.toolUseId} arrived before ` +
+          `the gate was bound to an ACP session — cannot raise a session-scoped elicitation; denying ` +
+          `(story-064 fallback).`,
+      );
+      return { decision: "deny", reason: askUserQuestionDenyReason() };
+    }
+
+    if (!isAskUserQuestionInput(call.toolInput)) {
+      this.warn(
+        `[gate elicitation] FAIL CLOSED: AskUserQuestion tool_use ${call.toolUseId} carried a malformed ` +
+          `tool_input (expected an object with a non-empty "questions" array) — cannot build a form ` +
+          `elicitation; denying (story-064 fallback).`,
+      );
+      return { decision: "deny", reason: askUserQuestionDenyReason() };
+    }
+
+    // The claude is blocked on this response with the JSONL silent, so re-arm the end-of-turn watchdog
+    // for as long as the elicitation is open (a slow human decision is NOT a dead turn). Mirror the
+    // requestPermission relay's heartbeat; always cleared in `finally`, on success or throw.
+    const stopHeartbeat = this.startPermissionHeartbeat();
+    try {
+      // TOTAL by construction (R4): build + round-trip are wrapped so ANY throw degrades to the
+      // story-064 deny with a legible diagnostic, never escaping decideElicitation. buildElicitationRequest
+      // itself can throw on a per-question input the structural guard did not catch (e.g. a question with
+      // no `options` array → `q.options.map(...)` throws); requestElicitation is fail-closed internally,
+      // but this catch is the mandatory total-function guarantee (the hook-server's decideWithTimeout is
+      // only the generic defense-in-depth net). A throw here is a dismissal, never an accept.
+      const req = buildElicitationRequest(call.toolUseId, sessionId, call.toolInput);
+      const resp = await requestElicitation(this.opts.client, req, {
+        timeoutMs: this.opts.elicitationTimeoutMs ?? DEFAULT_ELICITATION_TIMEOUT_MS,
+        onWarn: (m) => this.warn(m),
+      });
+      return mapOutcomeToDecision(resp);
+    } catch (err) {
+      this.warn(
+        `[gate elicitation] FAIL CLOSED: AskUserQuestion tool_use ${call.toolUseId} could not be ` +
+          `elicited (${err instanceof Error ? err.message : String(err)}) — denying (story-064 ` +
+          `fallback); the tool is intercepted, never approved.`,
+      );
+      return { decision: "deny", reason: askUserQuestionDenyReason() };
+    } finally {
+      stopHeartbeat();
+    }
   }
 
   /** Bounded poll until the pump has registered `toolUseId` as a clean single JSONL match. On

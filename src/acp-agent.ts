@@ -1237,6 +1237,14 @@ export class ClaudeAcpAgent implements Agent {
   toolUseCache: ToolUseCache;
   backgroundTerminals: { [key: string]: BackgroundTerminal } = {};
   clientCapabilities?: ClientCapabilities;
+  /**
+   * Story 065 (R1/R3) — did the client advertise `clientCapabilities.elicitation.form`
+   * at initialize? Presence-based (a present `form` may legitimately be an empty `{}`,
+   * so this is derived with `!= null`, NOT property truthiness). The 065 gate (task 3.1)
+   * reads this to decide relay-via-elicitation (R1) vs the story-064 deny fallback (R3).
+   * Defaults `false` so a client that never advertised elicitation falls back safely.
+   */
+  clientSupportsElicitationForm: boolean = false;
   logger: Logger;
   gatewayAuthRequest?: GatewayAuthRequest;
   // === SEAM(011): the injected engine — a no-op stub by default (READ-ONLY Degrau 1);
@@ -1334,6 +1342,15 @@ export class ClaudeAcpAgent implements Agent {
 
   async initialize(request: InitializeRequest): Promise<InitializeResponse> {
     this.clientCapabilities = request.clientCapabilities;
+    // Story 065 (R1/R3): capability negotiation — a present (non-null) `elicitation.form`
+    // means the client supports form elicitation. Presence-based detection is deliberate: both
+    // `undefined` and `null` are unsupported, and an empty `{}` `form` IS supported (the UNSTABLE
+    // ElicitationFormCapabilities type carries only an optional `_meta`, so a present `form` is
+    // legitimately `{}` — detection MUST be presence-based, not truthiness). Written as explicit
+    // `!== undefined && !== null` (not `!= null`) to satisfy the eqeqeq lint rule.
+    const elicitationForm = request.clientCapabilities?.elicitation?.form;
+    this.clientSupportsElicitationForm =
+      elicitationForm !== undefined && elicitationForm !== null;
 
     // Bypasses standard auth by routing requests through a custom Anthropic-protocol gateway.
     // Only offered when the client advertises `auth._meta.gateway` capability.
@@ -3100,6 +3117,11 @@ export class ClaudeAcpAgent implements Agent {
       gate = await setupSessionGate({
         ...this.gateOptions,
         client: this.client,
+        // Story 065 (R1/R3): negotiated in initialize() from clientCapabilities.elicitation.form. When
+        // true the gate drives AskUserQuestion through a real ACP form elicitation; when false it keeps
+        // the story-064 fail-closed deny-guard. this.client (AgentSideConnection) already satisfies the
+        // broadened client type (it has unstable_createElicitation).
+        clientSupportsElicitationForm: this.clientSupportsElicitationForm,
         onWarn: (m) => this.logger.error(m),
       });
     }
