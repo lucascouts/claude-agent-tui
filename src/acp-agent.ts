@@ -41,6 +41,7 @@ import {
   TerminalOutputResponse,
   WriteTextFileRequest,
   WriteTextFileResponse,
+  AvailableCommand,
 } from "@agentclientprotocol/sdk";
 import {
   deleteSession,
@@ -129,6 +130,10 @@ import {
 // (preserving the hook + every other key). Lives in the gate's settings-writer so it reuses durableWrite.
 import { applyUltracodeSettings } from "./gate/settings-writer.js";
 import { discoverAgents, type AgentCatalogEntry } from "./agent-catalog.js";
+// Story 063 (R1) — OFFLINE disk discovery of the `available_commands` set (custom slash-commands +
+// skills + enabled-plugin surfaces + built-ins), keyed on the session cwd. Populates the
+// `available_commands_update` the session emits at creation in place of the old unconditional `[]`.
+import { discoverCommands } from "./command-catalog.js";
 import { setupSessionGate } from "./permissions/gate-wiring.js";
 import type { GatePty, SessionGate, SessionGateOptions } from "./permissions/gate-wiring.js";
 // Story 057 / Task 2.3 — MCP scratch-file lifecycle (translate ACP servers → claude `--mcp-config`
@@ -586,6 +591,13 @@ export interface AgentDeps {
    * `~/.claude/agents`. Production passes nothing → the real disk glob.
    */
   discoverAgents?: (cwd: string) => AgentCatalogEntry[];
+  /**
+   * Story 063 (R1/R1.1) — override the offline command discovery `sendAvailableCommandsUpdate` sources
+   * the `available_commands_update` set from (default: the disk-only {@link discoverCommands}, keyed on
+   * the session cwd). Injected by the wiring test with an in-memory fake so the surface is exercised
+   * hermetically, never touching the real `~/.claude`. Production passes nothing → the real disk scan.
+   */
+  discoverCommands?: (cwd: string) => AvailableCommand[];
   /**
    * Story 056 (#812) — override the SDK session-metadata reader the end-of-turn `session_info_update`
    * push sources the title from (default: the pure {@link getSessionInfo} from the agent SDK, which
@@ -1258,6 +1270,8 @@ export class ClaudeAcpAgent implements Agent {
   private readonly gateOptions?: Omit<SessionGateOptions, "client" | "onWarn">;
   /** Story 056 (R3.2) — main-thread agent-persona discovery seam; see {@link AgentDeps.discoverAgents}. */
   private readonly discoverAgents: (cwd: string) => AgentCatalogEntry[];
+  /** Story 063 (R1/R1.1) — offline `available_commands` discovery seam; see {@link AgentDeps.discoverCommands}. */
+  private readonly discoverCommands: (cwd: string) => AvailableCommand[];
   /** Story 056 (#812) — SDK session-metadata reader for the end-of-turn title push; see
    *  {@link AgentDeps.getSessionInfo}. */
   private readonly getSessionInfo: (
@@ -1310,6 +1324,9 @@ export class ClaudeAcpAgent implements Agent {
     // Story 056 (R3.2): main-thread agent-persona discovery — defaults to the glob-only
     // discoverAgents; tests inject an in-memory fake so the `agent` surface is hermetic.
     this.discoverAgents = deps.discoverAgents ?? discoverAgents;
+    // Story 063 (R1/R1.1): offline `available_commands` discovery — defaults to the disk-only
+    // discoverCommands; tests inject an in-memory fake so the surface is hermetic (no real ~/.claude read).
+    this.discoverCommands = deps.discoverCommands ?? discoverCommands;
     // Story 056 (#812): end-of-turn session_info_update title source — defaults to the pure SDK
     // getSessionInfo; tests inject an in-memory fake so the push is hermetic (no real ~/.claude read).
     this.getSessionInfo = deps.getSessionInfo ?? getSessionInfo;
@@ -2820,15 +2837,25 @@ export class ClaudeAcpAgent implements Agent {
   private async sendAvailableCommandsUpdate(sessionId: string): Promise<void> {
     const session = this.sessions[sessionId];
     if (!session) return;
-    // === SEAM(023) Group 1: read-only Degrau-1 shim — emit a static (empty) command set. The SDK
-    // `query.supportedCommands()` is dropped; slash commands are owned by the interactive TUI in
-    // Degrau-1 and are not enumerable over the read-only JSONL path.
-    // Degrau 2 (030/032): PTY-backed control — surface the TUI's real command set. ===
+    // === SEAM(023) Group 1: `available_commands_update`. Historically the SDK
+    // `query.supportedCommands()` was dropped (slash commands are owned by the interactive TUI and are
+    // not enumerable over the read-only JSONL path), so Degrau-1 emitted a static empty set.
+    // Story 063 (R1/R1.1) now POPULATES this set OFFLINE from disk — `discoverCommands(session.cwd)`
+    // scans the cwd/user `.claude/{commands,skills}`, the enabled-plugin surfaces, and the built-in
+    // tier — instead of the unconditional `[]`. Discovery is SYNCHRONOUS but the 4 call-sites invoke
+    // this method fire-and-forget (`setTimeout(0)`), so it never blocks session creation (R4).
+    // Degrau 2 (030/032): PTY-backed control — surface the TUI's real live command set. ===
+    let availableCommands: AvailableCommand[];
+    try {
+      availableCommands = this.discoverCommands(session.cwd);
+    } catch {
+      availableCommands = []; // R4 — discovery must NEVER crash the session; degrade to []
+    }
     await this.client.sessionUpdate({
       sessionId,
       update: {
         sessionUpdate: "available_commands_update",
-        availableCommands: [],
+        availableCommands,
       },
     });
   }
