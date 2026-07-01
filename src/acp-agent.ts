@@ -1351,6 +1351,12 @@ export class ClaudeAcpAgent implements Agent {
     const elicitationForm = request.clientCapabilities?.elicitation?.form;
     this.clientSupportsElicitationForm =
       elicitationForm !== undefined && elicitationForm !== null;
+    // Story 065 (Task 6.1 live-probe): make the negotiated capability observable in the Zed logs so
+    // the in-Zed verdict (form rendered vs. gated-dormant behind the 064 deny) is deterministic. Goes
+    // to STDERR via logger.error — NEVER stdout, which carries the ACP ndJson stream.
+    this.logger.error(
+      `[065] clientCapabilities.elicitation.form advertised: ${this.clientSupportsElicitationForm}`,
+    );
 
     // Bypasses standard auth by routing requests through a custom Anthropic-protocol gateway.
     // Only offered when the client advertises `auth._meta.gateway` capability.
