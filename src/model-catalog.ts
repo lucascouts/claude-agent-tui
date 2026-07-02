@@ -191,5 +191,73 @@ export function isFastModeCapableModel(value: string): boolean {
   return FAST_MODE_MODELS.has(value);
 }
 
+/**
+ * Story 073 (R1) — the verdict of parsing the `/fast` panel captured from the live PTY:
+ *   - `"available"`   — the panel rendered its On/Off toggle (no gate line) → advertise the toggle.
+ *   - `"unavailable"` — the panel rendered a gate line ("requires usage credits", etc.) → omit it.
+ *   - `"pending"`     — the panel has not fully rendered yet (or is still checking) → keep waiting; the
+ *                       caller fails CLOSED (treats it as unavailable) once its bounded window elapses.
+ */
+export type FastModeSignal = "available" | "unavailable" | "pending";
+
+/**
+ * Story 073 (R1) — strip the ANSI/OSC/CSI control sequences the interactive TUI interleaves so the
+ * marker substrings below match on the plain text. Deliberately conservative (removes only escape
+ * sequences, never printable bytes) so a marker can never be split apart by cursor-addressing codes.
+ */
+function stripControlSequences(raw: string): string {
+  return raw
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC ...BEL / ST
+    .replace(/\x1b[@-Z\\-_]/g, "") // 2-byte ESC (Fe)
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ""); // CSI ...final
+}
+
+/**
+ * Story 073 (R1) — the `/fast` panel header, present in BOTH the available and gated renders (verified
+ * live in the spike). Its presence means the panel finished rendering, so a verdict can be reached; its
+ * absence means "not rendered yet" → pending.
+ */
+const FAST_PANEL_ANCHORS = [/fast mode \(research preview\)/i, /high-speed mode for opus/i];
+
+/** Story 073 (R1) — still resolving. Checked BEFORE the gate markers because the CLI renders this as
+ *  `Fast mode unavailable: Checking fast mode availability`, which also matches a gate substring. */
+const FAST_PENDING_MARKERS = ["checking fast mode availability"];
+
+/**
+ * Story 073 (R1) — gate lines that mean fast mode is NOT usable for this account. ANY match ⇒
+ * unavailable. `requires usage credits` is the LIVE-captured signal from the spike (Opus 4.8 · Claude
+ * Max, no credits); the rest are the sibling reasons mined from the pinned CLI binary (2.1.198): free/
+ * oauth → paid subscription, org preference → disabled, first-party gate → Anthropic-API-only, plus the
+ * generic `Fast mode unavailable: <reason>` and `Fast mode is not available` families.
+ */
+const FAST_UNAVAILABLE_MARKERS = [
+  "requires usage credits",
+  "requires a paid subscription",
+  "unavailable during evaluation",
+  "has been disabled by your organization",
+  "only available when using the anthropic api directly",
+  "fast mode unavailable", // generic `Fast mode unavailable: <reason>`
+  "fast mode is not available",
+  "fast mode is currently unavailable",
+];
+
+/**
+ * Story 073 (R1) — classify the `/fast` panel text captured from the live PTY into a {@link FastModeSignal}.
+ *
+ * Pure and side-effect free so it is unit-testable against the spike's live capture; the live PTY drive
+ * that FEEDS it lives behind the `FastModeProbe` seam (acp-agent `defaultFastModeProbe`). Order matters:
+ * pending is checked first (its text also matches a gate substring), then the gate markers, then — only
+ * once the panel anchor confirms a full render with NO gate line — `available`. Anything else is
+ * `pending`, and the caller fails closed on timeout (R1.2).
+ */
+export function classifyFastModeSignal(raw: string): FastModeSignal {
+  const text = stripControlSequences(raw).toLowerCase();
+  if (FAST_PENDING_MARKERS.some((m) => text.includes(m))) return "pending";
+  if (FAST_UNAVAILABLE_MARKERS.some((m) => text.includes(m))) return "unavailable";
+  // No gate line. If the panel finished rendering (anchor present), the On/Off toggle is usable.
+  if (FAST_PANEL_ANCHORS.some((re) => re.test(text))) return "available";
+  return "pending"; // panel not rendered yet → keep waiting within the caller's bounded window
+}
+
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */
 export const DEFAULT_MODEL_INFO: ModelInfo = MODEL_CATALOG[0];

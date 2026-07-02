@@ -10,8 +10,12 @@
 //   node --experimental-strip-types --test test/fast-mode.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ClaudeAcpAgent, defaultFastModeProbe } from "../dist/acp-agent.js";
-import { isFastModeCapableModel, FAST_MODE_MODELS } from "../dist/model-catalog.js";
+import { ClaudeAcpAgent, defaultFastModeProbe, driveFastModeProbe } from "../dist/acp-agent.js";
+import {
+  isFastModeCapableModel,
+  FAST_MODE_MODELS,
+  classifyFastModeSignal,
+} from "../dist/model-catalog.js";
 
 // ---- Task 2 (R5.1) pure predicate --------------------------------------------------------------
 
@@ -25,8 +29,121 @@ test("R5.1 isFastModeCapableModel: true for default/opus, false for fable5/sonne
   assert.deepEqual([...FAST_MODE_MODELS].sort(), ["default", "opus"], "the set is exactly {default,opus}");
 });
 
-test("R1.2 defaultFastModeProbe fails closed (returns false)", async () => {
-  assert.equal(await defaultFastModeProbe({ pty: {} as never, cwd: "/x" }), false);
+test("R1.2 defaultFastModeProbe fails closed (returns false, writes NOTHING to the pty — R4.3)", async () => {
+  const writes: string[] = [];
+  assert.equal(await defaultFastModeProbe({ pty: makeFakePty(writes), cwd: "/x" }), false);
+  assert.equal(writes.length, 0, "the default probe must NOT write to the pty (read-only invariant)");
+});
+
+// ---- Task 1/3.1 (R1) signal classifier — grounded in the live `/fast` panel capture --------------
+//
+// The GATED capture is verbatim from the story-073 live spike on an Opus 4.8 · Claude Max account with
+// no usage credits: opening `/fast` renders the panel header + a gate line instead of an On/Off toggle.
+// The AVAILABLE fixture is the same panel WITHOUT the gate line (binary-derived; R7.3 live-confirms).
+
+const GATED_PANEL =
+  "↯ Fast mode (research preview)\n" +
+  "High-speed mode for Opus 4.8. Draws from usage credits at a higher rate. Separate rate limits apply.\n" +
+  "Fast mode requires usage credits · /usage-credits to turn them on\n" +
+  "Learn more: https://code.claude.com/docs/en/fast-mode   Esc to cancel";
+
+const AVAILABLE_PANEL =
+  "↯ Fast mode (research preview)\n" +
+  "High-speed mode for Opus 4.8. Draws from usage credits at a higher rate. Separate rate limits apply.\n" +
+  "  ON   OFF   ← fast mode resets when switching models\n" +
+  "Learn more: https://code.claude.com/docs/en/fast-mode   Esc to cancel";
+
+const PENDING_PANEL = "Fast mode unavailable: Checking fast mode availability";
+
+// The gated panel wrapped in the kind of CSI/cursor noise the real TUI interleaves — the classifier
+// must strip control sequences before matching.
+const GATED_PANEL_ANSI =
+  "\x1b[2K\x1b[38;5;213m↯ Fast mode (research preview)\x1b[0m\x1b[10;1H" +
+  "\x1b[90mFast mode requires usage credits · /usage-credits to turn them on\x1b[0m";
+
+test("R1 classifyFastModeSignal: live gated panel → unavailable", () => {
+  assert.equal(classifyFastModeSignal(GATED_PANEL), "unavailable");
+});
+
+test("R1 classifyFastModeSignal: available panel (no gate line) → available", () => {
+  assert.equal(classifyFastModeSignal(AVAILABLE_PANEL), "available");
+});
+
+test("R1 classifyFastModeSignal: pending 'Checking fast mode availability' → pending (keep waiting)", () => {
+  assert.equal(classifyFastModeSignal(PENDING_PANEL), "pending");
+});
+
+test("R1 classifyFastModeSignal: no panel yet (empty / no fast text) → pending", () => {
+  assert.equal(classifyFastModeSignal(""), "pending");
+  assert.equal(classifyFastModeSignal("some unrelated TUI output"), "pending");
+});
+
+test("R1 classifyFastModeSignal: strips ANSI/CSI noise before matching (gated → unavailable)", () => {
+  assert.equal(classifyFastModeSignal(GATED_PANEL_ANSI), "unavailable");
+});
+
+test("R1 classifyFastModeSignal: other gate reasons (subscription/org/api-only) → unavailable", () => {
+  for (const gate of [
+    "Fast mode requires a paid subscription",
+    "Fast mode has been disabled by your organization",
+    "Fast mode is only available when using the Anthropic API directly",
+    "Fast mode is currently unavailable",
+  ]) {
+    assert.equal(
+      classifyFastModeSignal(`↯ Fast mode (research preview)\n${gate}`),
+      "unavailable",
+      gate,
+    );
+  }
+});
+
+// ---- Task 3.1 (R1) live-drive probe — exercised offline via a fake signal-emitting pty ------------
+//
+// A fake pty that, once `/fast` is submitted, feeds `panel` to the probe's onData listener (the real
+// TUI's response). This drives the REAL defaultFastModeProbe glue (open panel → collect → classify →
+// Esc) without a live binary; R7.3 is the end-to-end proof on a genuinely fast-available account.
+function makeSignalPty(panel: string) {
+  let onData: ((d: string) => void) | undefined;
+  let fired = false;
+  const writes: string[] = [];
+  return {
+    onExit: () => ({ dispose() {} }),
+    onData: (cb: (d: string) => void) => {
+      onData = cb;
+      return {
+        dispose() {
+          onData = undefined;
+        },
+      };
+    },
+    resize: () => {},
+    write: (d: string) => {
+      writes.push(d);
+      if (!fired && writes.join("").includes("/fast")) {
+        fired = true;
+        if (panel) setTimeout(() => onData?.(panel), 5);
+      }
+    },
+    kill: () => {},
+    _writes: writes,
+  } as never;
+}
+
+test("R1 driveFastModeProbe (opt-in) drives `/fast` and returns false on the live gated panel", async () => {
+  const pty = makeSignalPty(GATED_PANEL);
+  assert.equal(await driveFastModeProbe({ pty, cwd: "/x" }), false);
+  const writes = (pty as unknown as { _writes: string[] })._writes.join("");
+  assert.match(writes, /\/fast/, "the driver opened the panel via a /fast inject");
+  assert.match(writes, /\x1b/, "the driver wrote Esc to dismiss the panel");
+});
+
+test("R1 driveFastModeProbe (opt-in) drives `/fast` and returns true on an available panel", async () => {
+  const pty = makeSignalPty(AVAILABLE_PANEL);
+  assert.equal(await driveFastModeProbe({ pty, cwd: "/x" }), true);
+});
+
+test("R1.2 driveFastModeProbe fails closed on a broken pty (returns false)", async () => {
+  assert.equal(await driveFastModeProbe({ pty: {} as never, cwd: "/x" }), false);
 });
 
 // ---- Harness (effort-apply precedent + injected fastModeProbe) ----------------------------------

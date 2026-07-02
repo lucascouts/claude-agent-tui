@@ -123,6 +123,7 @@ import {
   modelSelectorDescription,
   DEFAULT_MODEL_INFO,
   isFastModeCapableModel,
+  classifyFastModeSignal,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
   ULTRACODE_EFFORT_LABEL,
@@ -521,15 +522,76 @@ export interface FastModeProbeContext {
 
 /**
  * Story 073 (R1) — the fast-mode availability-detection seam. Returns whether fast mode (`/fast`) is
- * available for THIS session's account. The production default {@link defaultFastModeProbe} fails
- * CLOSED (returns `false`): the real PTY-mirror signal that distinguishes "available" from
- * "account-gated" is characterized by the story-073 live spike (tasks.md Task 1) and wired later.
- * Tests inject a fake returning `true` to exercise the advertise/apply/reconcile paths (R2–R4).
+ * available for THIS session's account. The production default {@link defaultFastModeProbe} fails CLOSED
+ * (returns `false`): the live spike (Task 1) found that OBTAINING the signal requires DRIVING `/fast`
+ * over the PTY (there is no passive signal when gated — verified live), and an unsolicited session-start
+ * PTY write violates the fork's read-only-load (R4.3) and no-Ctrl+U-in-closed-loop invariants. The live
+ * driver therefore ships as the OPT-IN {@link driveFastModeProbe} (wired via `deps.fastModeProbe` after
+ * the R7.3 live-proof), not as the default. Tests inject a fake returning `true` to exercise the
+ * advertise/apply/reconcile paths (R2–R4).
  */
 export type FastModeProbe = (ctx: FastModeProbeContext) => Promise<boolean> | boolean;
 
-/** Production default — fail-closed until the story-073 live spike characterizes the `/fast` signal. */
+/** Production default — fail-closed (R1.2), invariant-safe: performs NO PTY write, so it preserves the
+ *  read-only-load (R4.3) and no-unsolicited-Ctrl+U invariants. The live signal is characterized (see
+ *  {@link classifyFastModeSignal}) and the live driver is {@link driveFastModeProbe}; wiring it as the
+ *  default is deferred to the R7.3 live-proof + a non-intrusive (idle-gated) wiring follow-up. */
 export const defaultFastModeProbe: FastModeProbe = () => false;
+
+/** Story 073 (R1) — bounded window the live driver waits for the `/fast` panel to render before failing
+ *  closed, polled every {@link FAST_PROBE_POLL_MS}. Generous because at session start the TUI needs a
+ *  beat to become input-ready; the manual R7.3 live-proof tunes it against a fast-available account. */
+const FAST_PROBE_WINDOW_MS = 4000;
+const FAST_PROBE_POLL_MS = 100;
+
+/**
+ * Story 073 (R1) — the OPT-IN live fast-mode detector (Task 1 spike + Task 3.1 parser). Opens the
+ * `/fast` panel via the SAME live PTY inject as `/effort` (no re-spawn, no `-p`/credit path — R3.3),
+ * collects the panel text on a temporary onData listener, classifies it with {@link classifyFastModeSignal},
+ * then writes Esc to dismiss the panel. Fails CLOSED (returns `false`) on timeout, a broken/dead PTY, or
+ * any throw (R1.2).
+ *
+ * NOT the production default: it writes to the PTY at probe time, which is safe only when the input box
+ * is idle. Wiring it as {@link defaultFastModeProbe} would break the read-only-load (R4.3) and
+ * no-Ctrl+U-in-closed-loop invariants (an unsolicited session-start write). It is exported so it can be
+ * injected via `deps.fastModeProbe` once the R7.3 live-proof validates it on a fast-available account and
+ * a non-intrusive (idle-gated) wiring lands. The pure classifier it delegates to IS unit-tested against
+ * the spike's live capture; this thin live-drive glue is exercised offline via a fake signal-emitting pty.
+ */
+export const driveFastModeProbe: FastModeProbe = async ({ pty }) => {
+  let sub: { dispose(): void } | undefined;
+  try {
+    let buffer = "";
+    sub = pty.onData((d) => {
+      buffer += d;
+    });
+    // Open the panel with the SAME seam every live inject uses (Ctrl+U clear + `/fast` + \r). Safe ONLY on
+    // an idle input box; interactive-only, so billing is untouched (R3.3).
+    sendPrompt(pty, "/fast", (fn) => fn());
+    const deadline = Date.now() + FAST_PROBE_WINDOW_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, FAST_PROBE_POLL_MS));
+      const verdict = classifyFastModeSignal(buffer);
+      if (verdict === "available") return true;
+      if (verdict === "unavailable") return false;
+      // "pending" → the panel has not rendered a decisive line yet; keep polling within the window
+    }
+    return false; // window elapsed without a decisive panel → fail closed (R1.2)
+  } catch {
+    return false; // dead/broken PTY or any inject error → fail closed (R1.2)
+  } finally {
+    try {
+      pty.write("\x1b"); // Esc — dismiss the `/fast` panel (raw escape, NEVER via sendPrompt — GOTCHA)
+    } catch {
+      /* pty already gone — nothing to dismiss */
+    }
+    try {
+      sub?.dispose();
+    } catch {
+      /* listener already disposed */
+    }
+  }
+};
 
 /**
  * No-op {@link IPty} stub for the Degrau-1 replay-only load path: there is no live `claude` process,
