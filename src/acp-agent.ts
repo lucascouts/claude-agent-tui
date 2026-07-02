@@ -1350,8 +1350,7 @@ export class ClaudeAcpAgent implements Agent {
     // legitimately `{}` — detection MUST be presence-based, not truthiness). Written as explicit
     // `!== undefined && !== null` (not `!= null`) to satisfy the eqeqeq lint rule.
     const elicitationForm = request.clientCapabilities?.elicitation?.form;
-    this.clientSupportsElicitationForm =
-      elicitationForm !== undefined && elicitationForm !== null;
+    this.clientSupportsElicitationForm = elicitationForm !== undefined && elicitationForm !== null;
     // Story 065 (Task 6.1 live-probe): make the negotiated capability observable in the Zed logs so
     // the in-Zed verdict (form rendered vs. gated-dormant behind the 064 deny) is deterministic. Goes
     // to STDERR via logger.error — NEVER stdout, which carries the ACP ndJson stream.
@@ -2333,7 +2332,11 @@ export class ClaudeAcpAgent implements Agent {
    * prior currentValue is left unchanged on failure (R3.7). Optimistic-on-apply, like effort: there is
    * no transcript drift event for the agent persona, so it is NOT reconciled afterward (R4.3).
    */
-  private async applyAgentChange(sessionId: string, session: Session, agent: string): Promise<void> {
+  private async applyAgentChange(
+    sessionId: string,
+    session: Session,
+    agent: string,
+  ): Promise<void> {
     if (agent === (this.currentAgent(session) ?? "default")) return; // no value change → no-op
     if (session.turnDetector !== undefined || session.respawning) {
       throw new Error(
@@ -2490,7 +2493,8 @@ export class ClaudeAcpAgent implements Agent {
       // an unknown id leaves the current value unchanged (R1.3 — never overwrite with null).
       const realModel = (carrier as { model?: unknown }).model;
       if (typeof realModel === "string" && realModel.length > 0) {
-        session.contextWindowSize = inferContextWindowFromModelId(realModel) ?? session.contextWindowSize;
+        session.contextWindowSize =
+          inferContextWindowFromModelId(realModel) ?? session.contextWindowSize;
       }
       for (const usageUpdate of usageUpdatesFor(carrier as unknown as UsageCarrier, {
         usageUpdate: this.usageUpdate,

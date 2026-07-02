@@ -198,7 +198,9 @@ function resolveEntry(
   // SECURITY (R3): drop any entry whose name escapes the allowlist — optional debug log, never a throw.
   if (!isSafeCommandName(name)) {
     if (process.env.FORK_COMMAND_DEBUG === "1") {
-      process.stderr.write(`[command-catalog] dropped unsafe command name: ${JSON.stringify(name)}\n`);
+      process.stderr.write(
+        `[command-catalog] dropped unsafe command name: ${JSON.stringify(name)}\n`,
+      );
     }
     return null;
   }
@@ -237,7 +239,9 @@ function resolveSkillEntry(
   // SECURITY (R3): drop any skill whose dir name escapes the allowlist — optional debug log, never a throw.
   if (!isSafeCommandName(name)) {
     if (process.env.FORK_COMMAND_DEBUG === "1") {
-      process.stderr.write(`[command-catalog] dropped unsafe skill name: ${JSON.stringify(name)}\n`);
+      process.stderr.write(
+        `[command-catalog] dropped unsafe skill name: ${JSON.stringify(name)}\n`,
+      );
     }
     return null;
   }
@@ -362,9 +366,11 @@ export function discoverCommands(cwd: string, deps: DiscoverCommandsDeps = {}): 
   // dir via `readdirDirs`. Shared by the user tier and the per-marketplace plugin tier.
   const foldSource = (source: DiskSource): void => {
     if (source.kind === "commands") {
-      for (const filename of readdirMd(source.dir)) add(resolveEntry(source.dir, filename, readFile));
+      for (const filename of readdirMd(source.dir))
+        add(resolveEntry(source.dir, filename, readFile));
     } else {
-      for (const subdir of readdirDirs(source.dir)) add(resolveSkillEntry(source.dir, subdir, readFile));
+      for (const subdir of readdirDirs(source.dir))
+        add(resolveSkillEntry(source.dir, subdir, readFile));
     }
   };
 

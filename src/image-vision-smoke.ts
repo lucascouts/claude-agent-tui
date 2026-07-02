@@ -99,8 +99,7 @@ export function imageVisionSmoke(version: string | null | undefined): VisionSmok
   if (parsed && versionGte(parsed[1], VISION_CONFIRMED_CLAUDE_VERSION)) {
     return {
       confirmed: true,
-      detail:
-        `claude ${parsed[1]} >= ${VISION_CONFIRMED_CLAUDE_VERSION} — @image is confirmed to vision-encode via Read`,
+      detail: `claude ${parsed[1]} >= ${VISION_CONFIRMED_CLAUDE_VERSION} — @image is confirmed to vision-encode via Read`,
     };
   }
   const named = parsed ? parsed[1] : "undetected";

@@ -56,7 +56,10 @@ export function extFor(mimeType: string | undefined | null): string {
  */
 export function materializeImage(data: string, mimeType: string | undefined | null): string {
   const bytes = Buffer.from(data, "base64");
-  const tempPath = path.join(os.tmpdir(), MATERIALIZED_IMAGE_PREFIX + randomUUID() + extFor(mimeType));
+  const tempPath = path.join(
+    os.tmpdir(),
+    MATERIALIZED_IMAGE_PREFIX + randomUUID() + extFor(mimeType),
+  );
   writeFileSync(tempPath, bytes);
   return tempPath;
 }

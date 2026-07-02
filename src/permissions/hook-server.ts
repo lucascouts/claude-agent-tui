@@ -66,9 +66,7 @@ export interface DenyWithReason {
 export type ToolDecision = "allow" | "deny" | DenyWithReason;
 
 /** The decider the server forwards each tool call to; returns the enforced {@link ToolDecision}. */
-export type ToolCallDecider = (
-  call: ForwardedToolCall,
-) => Promise<ToolDecision> | ToolDecision;
+export type ToolCallDecider = (call: ForwardedToolCall) => Promise<ToolDecision> | ToolDecision;
 
 /** The running hook server handle. */
 export interface HookServer {

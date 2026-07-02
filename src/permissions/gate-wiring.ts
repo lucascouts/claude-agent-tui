@@ -288,9 +288,7 @@ function isAskUserQuestionInput(input: unknown): input is AskUserQuestionInput {
     if (!Array.isArray(question.options) || question.options.length === 0) return false;
     return question.options.every(
       (o) =>
-        typeof o === "object" &&
-        o !== null &&
-        typeof (o as { label?: unknown }).label === "string",
+        typeof o === "object" && o !== null && typeof (o as { label?: unknown }).label === "string",
     );
   });
 }

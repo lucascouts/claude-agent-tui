@@ -19,10 +19,7 @@
 // injectable client surface so a unit test runs it OFFLINE against a fake client. It imports NOTHING
 // internal, and only `import type` from the SDK — the runtime zod validators are NOT importable here
 // (the package `exports` map blocks the deep specifier), so every guard below is STRUCTURAL.
-import type {
-  CreateElicitationRequest,
-  CreateElicitationResponse,
-} from "@agentclientprotocol/sdk";
+import type { CreateElicitationRequest, CreateElicitationResponse } from "@agentclientprotocol/sdk";
 
 /**
  * The gate decision this bridge yields. Mirrors hook-server's `DenyWithReason`: AskUserQuestion is
@@ -52,9 +49,7 @@ export interface AskUserQuestionInput {
  * the bridge with a fake client OFFLINE (no AgentSideConnection, no Zed).
  */
 export interface ElicitationClient {
-  unstable_createElicitation(
-    params: CreateElicitationRequest,
-  ): Promise<CreateElicitationResponse>;
+  unstable_createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
 }
 
 /**
@@ -70,10 +65,7 @@ export function buildElicitationRequest(
   sessionId: string,
   toolInput: AskUserQuestionInput,
 ): CreateElicitationRequest {
-  const properties: Record<
-    string,
-    { type: "string"; title: string; enum: string[] }
-  > = {};
+  const properties: Record<string, { type: "string"; title: string; enum: string[] }> = {};
   const required: string[] = [];
 
   for (const q of toolInput.questions) {
@@ -114,9 +106,7 @@ const KNOWN_ACTIONS = new Set(["accept", "decline", "cancel"]);
  * `action` is one of accept|decline|cancel. Used to fail closed on a malformed wire response WITHOUT
  * importing the zod validators (blocked by the package `exports` map).
  */
-function hasKnownAction(
-  resp: unknown,
-): resp is CreateElicitationResponse & { action: string } {
+function hasKnownAction(resp: unknown): resp is CreateElicitationResponse & { action: string } {
   return (
     typeof resp === "object" &&
     resp !== null &&
@@ -136,9 +126,7 @@ function hasKnownAction(
  *   - `decline`/`cancel`/any unrecognized-or-missing action: the reason reads as a user DISMISSAL, not
  *     an answer (default-deny defensively for unknown actions).
  */
-export function mapOutcomeToDecision(
-  resp: CreateElicitationResponse,
-): ElicitationDecision {
+export function mapOutcomeToDecision(resp: CreateElicitationResponse): ElicitationDecision {
   // `resp` is a typed union, but we read `action`/`content` defensively (a synthetic fail-closed
   // cancel or a malformed upstream value may reach here) via a single localized view.
   const view = resp as {
