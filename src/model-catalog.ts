@@ -145,5 +145,35 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-haiku-4-5": 200_000,
 };
 
+/**
+ * Story 072 — the version/context PREFIX the claude `/model` picker now shows before the static tagline
+ * (e.g. "Opus 4.8 with 1M context · Best for everyday, complex tasks"). Keyed by catalog `value`.
+ *
+ * CURATED + DRIFT-PRONE, exactly like MODEL_CATALOG membership: the fork holds only aliases pre-turn and
+ * cannot derive the concrete version (the SDK `supportedModels()` was cut), so these MIRROR the LIVE
+ * picker and MUST be re-verified on each model launch (source: the user's live `/model` output). The
+ * static tagline stays on `ModelInfo.description` (069 R3 untouched); this only prepends "<version> · ".
+ * `opusplan` is intentionally absent — its tagline ("Use Opus in plan mode, Sonnet otherwise") already
+ * names the models, so it renders bare.
+ */
+export const MODEL_VERSION_LABELS: Record<string, string> = {
+  default: "Opus 4.8 with 1M context",
+  opus: "Opus 4.8 with 1M context",
+  sonnet: "Sonnet 5",
+  "sonnet[1m]": "Sonnet 5 with 1M context",
+  haiku: "Haiku 4.5",
+};
+
+/**
+ * Story 072 — compose the Zed selector description: "<version label> · <tagline>", or the bare tagline
+ * when no label exists (e.g. `opusplan`). PURE + TOTAL: never throws on a missing label or tagline.
+ */
+export function modelSelectorDescription(info: ModelInfo): string {
+  const label = MODEL_VERSION_LABELS[info.value];
+  const tagline = info.description ?? "";
+  if (!label) return tagline;
+  return tagline ? `${label} · ${tagline}` : label;
+}
+
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */
 export const DEFAULT_MODEL_INFO: ModelInfo = MODEL_CATALOG[0];

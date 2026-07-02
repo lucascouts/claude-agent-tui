@@ -92,6 +92,33 @@ test("069 R3: MODEL_CATALOG descriptions match the original /model picker verbat
   );
 });
 
+test("072: modelSelectorDescription prepends the version/context label to the tagline", () => {
+  const byValue: Record<string, { value: string; description?: string }> = {};
+  for (const m of catalog.MODEL_CATALOG) byValue[m.value] = m;
+  // The `/model` picker format: "<version + context> · <static tagline>".
+  assert.equal(
+    catalog.modelSelectorDescription(byValue.default),
+    "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+  );
+  assert.equal(
+    catalog.modelSelectorDescription(byValue.opus),
+    "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+  );
+  assert.equal(
+    catalog.modelSelectorDescription(byValue.sonnet),
+    "Sonnet 5 · Efficient for routine tasks",
+  );
+  assert.equal(
+    catalog.modelSelectorDescription(byValue.haiku),
+    "Haiku 4.5 · Fastest for quick answers",
+  );
+  // opusplan has NO version label → bare tagline (069 R3 unchanged), no leading " · ".
+  assert.equal(
+    catalog.modelSelectorDescription(byValue.opusplan),
+    "Use Opus in plan mode, Sonnet otherwise",
+  );
+});
+
 test("068 anti-drift: every MODEL_CATALOG value has an explicit MODEL_CONTEXT_WINDOWS entry", () => {
   for (const m of catalog.MODEL_CATALOG) {
     assert.ok(

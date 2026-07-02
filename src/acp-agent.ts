@@ -120,6 +120,7 @@ import {
   MODEL_CATALOG,
   MODEL_CONTEXT_WINDOWS,
   MODEL_ID_CONTEXT_WINDOWS,
+  modelSelectorDescription,
   DEFAULT_MODEL_INFO,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
@@ -3378,7 +3379,9 @@ function buildConfigOptions(
       options: modelInfos.map((m) => ({
         value: m.value,
         name: m.displayName,
-        description: m.description ?? undefined,
+        // Story 072 — prepend the version/context label ("Opus 4.8 with 1M context · <tagline>"),
+        // mirroring the live `/model` picker; bare tagline when no label (e.g. opusplan).
+        description: modelSelectorDescription(m) || undefined,
       })),
     },
   ];
