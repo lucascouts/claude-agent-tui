@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.7.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.6.0...v0.7.0) (2026-07-02)
+
+
+### Features
+
+* **062:** implement ACP logout method ([1acfd68](https://github.com/lucascouts/claude-agent-tui/commit/1acfd68099be011b17c0e29dbf2310b22b269a57))
+* **063:** offline available_commands discovery (commands + skills + plugins + built-ins) ([afce715](https://github.com/lucascouts/claude-agent-tui/commit/afce715e7b509fb5c219e5da9e73a151206fce59))
+* **064:** deny AskUserQuestion at the gate (anti-stall bridge guard) ([0428714](https://github.com/lucascouts/claude-agent-tui/commit/0428714de45adef578d8f29d932b9732b1c805a2))
+* **065:** relay AskUserQuestion via ACP elicitation (form), fail-closed degrade to 064 ([d1dfe6a](https://github.com/lucascouts/claude-agent-tui/commit/d1dfe6ab6a5fdbdbab242c823863cd9ee0414176))
+* **072:** show model version/context in Zed selector descriptions ([496e976](https://github.com/lucascouts/claude-agent-tui/commit/496e97686665b0b28ee72f858a7cd6fa2e7b5fb6))
+
+
+### Bug Fixes
+
+* **061:** wire session/delete to the SDK-expected handler name ([f26c7a4](https://github.com/lucascouts/claude-agent-tui/commit/f26c7a4e9bceade682b6521f0081c8965a1ce355))
+* **068:** report correct context-window size per model (200K vs 1M) ([31a1548](https://github.com/lucascouts/claude-agent-tui/commit/31a15486fc38b349820f4bdb4a20331577daa7ab))
+* **069:** authoritative context window from the transcript + original /model descriptions ([bd46d0a](https://github.com/lucascouts/claude-agent-tui/commit/bd46d0ae46517f80cf61d44c8036dba1f34bf866))
+* **070:** re-vendor baseline v0.39.0 → v0.53.0 (provenance + claude-agent-sdk 0.3.195) ([6f36e38](https://github.com/lucascouts/claude-agent-tui/commit/6f36e38f4fdfb540aefbe01dc19bf8c627f7da68))
+* **071:** Sonnet 5 native 1M context window (version-aware sonnet resolver) ([77813b9](https://github.com/lucascouts/claude-agent-tui/commit/77813b9bbbe3a815cd3e7120d4b1aae756a96fa9))
+
 ## [0.6.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.5.2...v0.6.0) (2026-06-29)
 
 
