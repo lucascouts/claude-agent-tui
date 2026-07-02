@@ -174,5 +174,22 @@ export function modelSelectorDescription(info: ModelInfo): string {
   return tagline ? `${label} · ${tagline}` : label;
 }
 
+/**
+ * Story 073 (R5.1) — the catalog `value`s that support fast mode (`/fast on|off`). Fast mode "uses
+ * Claude Opus with faster output (it does not downgrade to a smaller model)" and is available on Opus
+ * 4.8/4.7 only; the CLI turns it off when switching to a non-Opus model. `default` resolves to the
+ * recommended Opus, so both `default` and `opus` qualify; `fable5`/`sonnet`/`haiku` do NOT.
+ *
+ * Kept HERE (not on {@link ModelInfo}) because `ModelInfo` is the SDK shape and cannot carry a
+ * fork-only `supportsFastMode` field — the same reason the effort/auto flags that DO exist on the SDK
+ * type live inline while this predicate is external.
+ */
+export const FAST_MODE_MODELS: ReadonlySet<string> = new Set(["default", "opus"]);
+
+/** Story 073 (R5.1) — true when the catalog `value` is an Opus alias that supports fast mode. */
+export function isFastModeCapableModel(value: string): boolean {
+  return FAST_MODE_MODELS.has(value);
+}
+
 /** The safe fallback entry, kept as a named export so callers can seed/anchor on it without a lookup. */
 export const DEFAULT_MODEL_INFO: ModelInfo = MODEL_CATALOG[0];

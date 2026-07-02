@@ -122,6 +122,7 @@ import {
   MODEL_ID_CONTEXT_WINDOWS,
   modelSelectorDescription,
   DEFAULT_MODEL_INFO,
+  isFastModeCapableModel,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
   ULTRACODE_EFFORT_LABEL,
@@ -316,6 +317,23 @@ type Session = {
    */
   ultracodeActive?: boolean;
   /**
+   * Story 073 (R2.3/R3.2) — the session's CURRENT fast-mode on/off state (default off). Set by
+   * {@link applyFastModeChange} and read by {@link buildConfigOptions} for the `fast` option's
+   * `currentValue`. Reset to `false` on a switch away from an Opus model (R4.1).
+   */
+  fastModeOn?: boolean;
+  /**
+   * Story 073 (R1.3) — cached fast-mode availability for this session (the {@link FastModeProbe}
+   * result). `undefined` = not yet probed; `false` = unavailable/non-Opus (option omitted); `true` =
+   * available (option advertised). Re-probed on a return to an Opus model (R4.2).
+   */
+  fastModeAvailable?: boolean;
+  /**
+   * Story 073 (R3.1) — a `/fast on|off` inject requested WHILE a turn is in flight is deferred here
+   * (last-write-wins) and flushed once the turn settles (mirrors {@link pendingEffortInjection}).
+   */
+  pendingFastInjection?: boolean;
+  /**
    * Story 046 (R3.8) — true WHILE an in-place re-spawn (R3.4 dontAsk/bypass switch) is between the old
    * PTY teardown and the new PTY being ready. Selector changes arriving in this window are rejected
    * rather than written to a dead PTY.
@@ -494,6 +512,25 @@ export interface StartEngineArgs {
 /** The createSession injection seam: spawn the PTY engine + JSONL watcher + locate the transcript. */
 export type StartEngine = (args: StartEngineArgs) => Promise<StartedEngine> | StartedEngine;
 
+/** Context passed to a {@link FastModeProbe}: enough to drive/observe the live PTY when the real
+ *  detector is wired (story 073 Task 1), without exposing the private `Session` type. */
+export interface FastModeProbeContext {
+  pty: IPty;
+  cwd: string;
+}
+
+/**
+ * Story 073 (R1) — the fast-mode availability-detection seam. Returns whether fast mode (`/fast`) is
+ * available for THIS session's account. The production default {@link defaultFastModeProbe} fails
+ * CLOSED (returns `false`): the real PTY-mirror signal that distinguishes "available" from
+ * "account-gated" is characterized by the story-073 live spike (tasks.md Task 1) and wired later.
+ * Tests inject a fake returning `true` to exercise the advertise/apply/reconcile paths (R2–R4).
+ */
+export type FastModeProbe = (ctx: FastModeProbeContext) => Promise<boolean> | boolean;
+
+/** Production default — fail-closed until the story-073 live spike characterizes the `/fast` signal. */
+export const defaultFastModeProbe: FastModeProbe = () => false;
+
 /**
  * No-op {@link IPty} stub for the Degrau-1 replay-only load path: there is no live `claude` process,
  * but the session record's `pty` field is typed `IPty`. Every method is inert — teardown's `kill()`
@@ -610,6 +647,12 @@ export interface AgentDeps {
     sessionId: string,
     options?: { dir?: string },
   ) => Promise<{ summary: string } | undefined>;
+  /**
+   * Story 073 (R1) — override the fast-mode availability probe (default: {@link defaultFastModeProbe},
+   * which fails closed until the live spike wires the real detector). Tests inject a fake returning
+   * `true`/`false` to exercise the toggle's advertise/apply/reconcile paths hermetically.
+   */
+  fastModeProbe?: FastModeProbe;
 }
 
 /**
@@ -1287,6 +1330,8 @@ export class ClaudeAcpAgent implements Agent {
     sessionId: string,
     options?: { dir?: string },
   ) => Promise<{ summary: string } | undefined>;
+  /** Story 073 (R1) — fast-mode availability probe seam; see {@link AgentDeps.fastModeProbe}. */
+  private readonly fastModeProbe: FastModeProbe;
   /** Live PTY-engine registry shared with the per-session engines (story 014 cleanup map). */
   private readonly engines: Map<string, SessionEngine> = new Map();
 
@@ -1302,6 +1347,7 @@ export class ClaudeAcpAgent implements Agent {
     this.logger = logger ?? console;
     this.engine = engine;
     this.startEngine = deps.startEngine ?? defaultStartEngine;
+    this.fastModeProbe = deps.fastModeProbe ?? defaultFastModeProbe;
     // Story 043 (R2.1): when liveDiff is ON, the live JSONL reader is the diff-enriched reader
     // (getSessionMessages + uuid→toolUseResult hydration), which restores the story-021 Edit/Write
     // diff on BOTH the live pump and the session/load replay (both read this.getMessages once). The
@@ -1940,6 +1986,11 @@ export class ClaudeAcpAgent implements Agent {
       // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
       // skipped so the prior currentValue stays unchanged (R3.7-style failure path).
       await this.applyAgentChange(params.sessionId, session, resolvedValue);
+    } else if (params.configId === "fast") {
+      // Story 073 (R3): fast mode is a LIVE `/fast on|off` inject (mirrors /effort — no re-spawn, works
+      // pre-first-interaction, defers mid-turn). It never throws, so applyConfigOptionValue below always
+      // commits the new currentValue (optimistic, like /effort).
+      this.applyFastModeChange(session, resolvedValue);
     }
 
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
@@ -2064,6 +2115,12 @@ export class ClaudeAcpAgent implements Agent {
     if (effort !== undefined) {
       session.pendingEffortInjection = undefined;
       this.injectEffortCommand(session, effort);
+    }
+    // Story 073 (R3.1) — flush a deferred `/fast on|off` injection too (last-write-wins).
+    const fast = session.pendingFastInjection;
+    if (fast !== undefined) {
+      session.pendingFastInjection = undefined;
+      this.injectFastCommand(session, fast);
     }
   }
 
@@ -2321,6 +2378,90 @@ export class ClaudeAcpAgent implements Agent {
    */
   private injectEffortCommand(session: Session, level: string): void {
     sendPrompt(session.pty, `/effort ${level}`, (fn) => fn());
+  }
+
+  /**
+   * Story 073 (R3) — apply a fast-mode toggle LIVE via `/fast on|off`, mirroring {@link applyEffortChange}
+   * exactly: a side-channel PTY write, no re-spawn, no turn, works before the first interaction. A no-op
+   * (same on/off state) applies nothing; mid-turn it defers (pendingFastInjection) and flushes when the
+   * turn settles. `value` is the selector's `"on"`/`"off"`. NO billing/spawn/credential change (R3.3).
+   */
+  private applyFastModeChange(session: Session, value: string): void {
+    const on = value === "on";
+    if (on === (session.fastModeOn ?? false)) return; // no value change → no-op
+    session.fastModeOn = on;
+    if (session.turnDetector !== undefined) {
+      // A turn is in flight — injecting mid-turn corrupts the PTY input. Defer (mirrors /effort, /model).
+      session.pendingFastInjection = on;
+      return;
+    }
+    this.injectFastCommand(session, on);
+  }
+
+  /**
+   * Side-channel `/fast on|off` write — synchronous, resolves immediately (never a turn). Like `/effort`
+   * (and unlike `/model`), fast mode applies INLINE with no blocking "Switch?" dialog, so sendPrompt's
+   * own submit `\r` suffices and NO confirm Enter is scheduled.
+   */
+  private injectFastCommand(session: Session, on: boolean): void {
+    sendPrompt(session.pty, on ? "/fast on" : "/fast off", (fn) => fn());
+  }
+
+  /**
+   * Story 073 (R1) — (re-)probe fast-mode availability for a session and reconcile the `fast` toggle.
+   * On a non-Opus model it forces the toggle OFF/absent WITHOUT probing (R4.1); on an Opus model it
+   * consults the injectable {@link FastModeProbe} (production default fails closed), caches the result
+   * (R1.3), rebuilds `configOptions`, and emits a `config_option_update` only when the visible option
+   * set changes. Fire-and-forget from createSession + the model-switch reconcile (R4.2).
+   */
+  private async refreshFastMode(sessionId: string, session: Session): Promise<void> {
+    const modelOpt = session.configOptions.find((o) => o.id === "model");
+    const modelId =
+      typeof modelOpt?.currentValue === "string" ? modelOpt.currentValue : DEFAULT_MODEL_INFO.value;
+
+    let available: boolean;
+    if (!isFastModeCapableModel(modelId)) {
+      available = false; // non-Opus → never advertise, never probe (R2.2/R4.1)
+    } else {
+      try {
+        available = await this.fastModeProbe({ pty: session.pty, cwd: session.cwd });
+      } catch {
+        available = false; // a throwing probe fails CLOSED (R1.2)
+      }
+    }
+
+    const before = session.fastModeAvailable ?? false;
+    session.fastModeAvailable = available;
+    if (available === before) return; // no visible change → no rebuild/emit
+
+    session.configOptions = this.rebuildConfigOptionsPreserving(session, modelId);
+    // The session may have been torn down while the probe was awaited — guard the emit.
+    if (!this.sessions[sessionId]) return;
+    await this.client.sessionUpdate({
+      sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: session.configOptions },
+    });
+  }
+
+  /** Story 073 — rebuild `configOptions` from the session's current selections (model/effort/agent) plus
+   *  the fast-mode state, without re-globbing agents. Used by {@link refreshFastMode}. */
+  private rebuildConfigOptionsPreserving(session: Session, modelId: string): SessionConfigOption[] {
+    const effortOpt = session.configOptions.find((o) => o.id === "effort");
+    const currentEffort =
+      typeof effortOpt?.currentValue === "string" ? effortOpt.currentValue : undefined;
+    const agentOpt = session.configOptions.find((o) => o.id === "agent");
+    const currentAgent =
+      typeof agentOpt?.currentValue === "string" ? agentOpt.currentValue : undefined;
+    return buildConfigOptions(
+      session.modes,
+      modelId,
+      session.modelInfos,
+      currentEffort,
+      session.agents ?? [],
+      currentAgent,
+      session.fastModeAvailable ?? false,
+      session.fastModeOn ?? false,
+    );
   }
 
   /**
@@ -2965,6 +3106,13 @@ export class ClaudeAcpAgent implements Agent {
       const agentOpt = session.configOptions.find((o) => o.id === "agent");
       const currentAgent =
         typeof agentOpt?.currentValue === "string" ? agentOpt.currentValue : undefined;
+      // Story 073 (R4.1) — a model switch turns fast mode OFF and drops its availability (mirroring the
+      // CLI's "switching to other models turns off fast mode"). The rebuild below therefore omits the
+      // toggle; if the new model is Opus, refreshFastMode (kicked off after) re-probes and re-advertises.
+      if (previousModelId !== value) {
+        session.fastModeOn = false;
+        session.fastModeAvailable = false;
+      }
       session.configOptions = buildConfigOptions(
         session.modes,
         value,
@@ -2972,7 +3120,16 @@ export class ClaudeAcpAgent implements Agent {
         currentEffort,
         session.agents ?? [],
         currentAgent,
+        session.fastModeAvailable ?? false,
+        session.fastModeOn ?? false,
       );
+
+      // Story 073 (R4.2) — on a switch TO an Opus model, re-run availability detection out of band and
+      // re-advertise the toggle (as off) when available. Fire-and-forget: the synchronous response above
+      // ships without the toggle; refreshFastMode emits a follow-up config_option_update once it settles.
+      if (previousModelId !== value && isFastModeCapableModel(value)) {
+        void this.refreshFastMode(sessionId, session);
+      }
 
       // === SEAM(023) Group 1: the SDK effort sync (query.applyFlagSettings) after a model switch is
       // dropped — configOptions already reflects the new effort locally.
@@ -3283,6 +3440,12 @@ export class ClaudeAcpAgent implements Agent {
       gate,
     };
 
+    // Story 073 (R1) — the seed model is Opus (`default`), so probe fast-mode availability out of band
+    // and advertise the toggle when available. Fire-and-forget (like sendAvailableCommandsUpdate): the
+    // response below ships the seed options; refreshFastMode emits a follow-up config_option_update. The
+    // production probe fails closed, so today's stream is byte-for-byte unaffected until the spike wires it.
+    void this.refreshFastMode(startedSessionId, this.sessions[startedSessionId]);
+
     return {
       sessionId: startedSessionId,
       modes,
@@ -3358,6 +3521,8 @@ function buildConfigOptions(
   currentEffortLevel?: string,
   agents: AgentCatalogEntry[] = [],
   currentAgent?: string,
+  fastAvailable = false,
+  currentFast = false,
 ): SessionConfigOption[] {
   const options: SessionConfigOption[] = [
     {
@@ -3389,6 +3554,26 @@ function buildConfigOptions(
       })),
     },
   ];
+
+  // Story 073 (R2) — the fast-mode toggle, positioned right after the model selector. GATED on an
+  // Opus alias (R2.2, isFastModeCapableModel) AND detected availability (R1, fastAvailable): fast mode
+  // is Opus-only and account-gated, so a non-Opus model or an unavailable account omits it entirely.
+  // `category:"model"` is a best-guess pending the R7.3 live-proof (the exact category Zed expects for
+  // fast mode is not knowable offline). currentValue mirrors the session's fast-mode state.
+  if (isFastModeCapableModel(currentModelId) && fastAvailable) {
+    options.push({
+      id: "fast",
+      name: "Fast Mode",
+      description: "Faster Opus output (/fast)",
+      category: "model",
+      type: "select",
+      currentValue: currentFast ? "on" : "off",
+      options: [
+        { value: "off", name: "Off" },
+        { value: "on", name: "On" },
+      ],
+    });
+  }
 
   // Add effort level option based on the currently selected model
   const currentModelInfo = modelInfos.find((m) => m.value === currentModelId);
