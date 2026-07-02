@@ -49,11 +49,15 @@ test("068 R1.1: opus → 1M (the fix — was wrongly 200K)", () => {
   assert.equal(infer("opus"), 1_000_000);
 });
 
-test("068 R1.1: sonnet → 200K (standard window; correct as-is, NOT 1M)", () => {
-  assert.equal(infer("sonnet"), 200_000);
+test("068 R1.1: sonnet → 1M (plain `sonnet` resolves to Sonnet 5, native 1M)", () => {
+  // The redundant `sonnet[1m]` alias was dropped: Sonnet 5 has no smaller context variant, so the
+  // bare `sonnet` alias now seeds 1M directly.
+  assert.equal(infer("sonnet"), 1_000_000);
 });
 
-test("068 R1.1 / UB2: sonnet[1m] → 1M (must NOT regress)", () => {
+test("068 R1.2: a literal `[1m]` suffix still → 1M via the regex fallback", () => {
+  // `sonnet[1m]` is no longer a catalog alias, but the `\b1m\b` regex still resolves any lingering
+  // `[1m]`-suffixed string to 1M (defensive).
   assert.equal(infer("sonnet[1m]"), 1_000_000);
 });
 
@@ -71,9 +75,11 @@ test("068 R1.2: fully unknown → null; call site applies DEFAULT_CONTEXT_WINDOW
   assert.equal(resolve("totally-unknown-model"), 200_000);
 });
 
-test("069 R2: default + opusplan seeds → 1M (default = recommended Opus; opusplan plans with Opus)", () => {
+test("069 R2: default/fable5/opus/sonnet seeds → 1M (all native 1M pre-first-turn)", () => {
   assert.equal(infer("default"), 1_000_000);
-  assert.equal(infer("opusplan"), 1_000_000);
+  assert.equal(infer("fable5"), 1_000_000);
+  assert.equal(infer("opus"), 1_000_000);
+  assert.equal(infer("sonnet"), 1_000_000);
 });
 
 test("069 R3: MODEL_CATALOG descriptions match the original /model picker verbatim", () => {
@@ -82,14 +88,10 @@ test("069 R3: MODEL_CATALOG descriptions match the original /model picker verbat
   assert.equal(byValue.opus.description, "Best for everyday, complex tasks");
   assert.equal(byValue.sonnet.description, "Efficient for routine tasks");
   assert.equal(byValue.haiku.description, "Fastest for quick answers");
-  assert.equal(byValue.opusplan.displayName, "Opus Plan Mode");
-  assert.equal(byValue.opusplan.description, "Use Opus in plan mode, Sonnet otherwise");
-  // fork-only items: `default` carries the Opus text (default = recommended Opus); `sonnet[1m]` = Sonnet + 1M note.
+  assert.equal(byValue.fable5.displayName, "Fable");
+  assert.equal(byValue.fable5.description, "Most capable for your hardest and longest-running tasks");
+  // `default` carries the Opus text (default = recommended Opus).
   assert.equal(byValue.default.description, "Best for everyday, complex tasks");
-  assert.equal(
-    byValue["sonnet[1m]"].description,
-    "Efficient for routine tasks, with a 1M-token context window",
-  );
 });
 
 test("072: modelSelectorDescription prepends the version/context label to the tagline", () => {
@@ -105,17 +107,21 @@ test("072: modelSelectorDescription prepends the version/context label to the ta
     "Opus 4.8 with 1M context · Best for everyday, complex tasks",
   );
   assert.equal(
+    catalog.modelSelectorDescription(byValue.fable5),
+    "Fable 5 with 1M context · Most capable for your hardest and longest-running tasks",
+  );
+  assert.equal(
     catalog.modelSelectorDescription(byValue.sonnet),
-    "Sonnet 5 · Efficient for routine tasks",
+    "Sonnet 5 with 1M context · Efficient for routine tasks",
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.haiku),
     "Haiku 4.5 · Fastest for quick answers",
   );
-  // opusplan has NO version label → bare tagline (069 R3 unchanged), no leading " · ".
+  // A label-less entry → bare tagline, no leading " · " (total-function safeguard).
   assert.equal(
-    catalog.modelSelectorDescription(byValue.opusplan),
-    "Use Opus in plan mode, Sonnet otherwise",
+    catalog.modelSelectorDescription({ value: "no-label-x", description: "just the tagline" } as never),
+    "just the tagline",
   );
 });
 

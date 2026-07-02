@@ -46,16 +46,17 @@ export const ULTRACODE_EFFORT_LABEL = "ultracode (xhigh + orchestration)";
  * `claude` TUI alias accepted by `/model <alias>` (live) and `--model <alias>` (spawn). `default` is
  * first and is the safe fallback.
  *
- * ORDER + membership mirror the ORIGINAL's `/model` picker, LIVE-VERIFIED against 2.1.195 (PTY probe):
- * `Default (recommended)`, `Opus`, `Sonnet`, `Sonnet (1M context)`, `Haiku`. The original gets this
- * from the SDK `supportedModels()` the fork cut, so we curate it statically. The 1M alias is literally
- * `sonnet[1m]` (`/model sonnet[1m]` accepted; `sonnet-1m` → "not found"). `opusplan` is a fork-only
- * EXTRA (a real `claude` plan-mode preset the original does not list) kept as the trailing entry.
+ * ORDER + membership: `Default (recommended)`, `Fable 5`, `Opus`, `Sonnet`, `Haiku`. The original gets
+ * its list from the SDK `supportedModels()` the fork cut, so we curate it statically. `fable5` (`/model
+ * fable5` — the Claude 5 family's top model, released 2026-07-01) sits right after `default`. The
+ * redundant `sonnet[1m]` alias was dropped: Sonnet 5 is natively 1M, so plain `sonnet` already IS the 1M
+ * model. The fork-only `opusplan` extra was dropped too (three Sonnet-flavored entries + inconsistent
+ * Opus thinking made it more confusing than useful).
  *
- * Effort-capable models (`default`/`opus`/`sonnet`/`sonnet[1m]`) carry `supportsEffort` +
- * `supportedEffortLevels`; `haiku`/`opusplan` advertise none. `supportsAutoMode: true` on the same four
- * surfaces the `auto` permission mode (a model classifier) — the original drops `auto` on `haiku`
- * (the SDK signal `reconcileModeFromTranscript` clamps), so haiku/opusplan omit it.
+ * Effort-capable models (`default`/`fable5`/`opus`/`sonnet`) carry `supportsEffort` +
+ * `supportedEffortLevels`; `haiku` advertises none. `supportsAutoMode: true` on the same four surfaces
+ * the `auto` permission mode (a model classifier) — the original drops `auto` on `haiku` (the SDK signal
+ * `reconcileModeFromTranscript` clamps), so haiku omits it.
  */
 export const MODEL_CATALOG: ModelInfo[] = [
   {
@@ -63,6 +64,18 @@ export const MODEL_CATALOG: ModelInfo[] = [
     displayName: "Default (recommended)",
     // Story 069 (R3): `default` resolves to the recommended Opus, so it carries the Opus description.
     description: "Best for everyday, complex tasks",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
+  },
+  {
+    value: "fable5",
+    // Bare family name in the title (like Opus/Sonnet/Haiku); the "Fable 5" version lives in the
+    // MODEL_VERSION_LABELS prefix that composes the selector description.
+    displayName: "Fable",
+    // Fable 5 (Claude 5 family, released 2026-07-01) — the most advanced generally available model.
+    // Description verbatim from the live `/model` picker of the interactive `claude` CLI.
+    description: "Most capable for your hardest and longest-running tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
@@ -84,46 +97,32 @@ export const MODEL_CATALOG: ModelInfo[] = [
     supportsAutoMode: true,
   },
   {
-    value: "sonnet[1m]",
-    displayName: "Sonnet (1M context)",
-    // Story 069 (R3): fork-only 1M variant — the Sonnet description plus its 1M-window note.
-    description: "Efficient for routine tasks, with a 1M-token context window",
-    supportsEffort: true,
-    supportedEffortLevels: REASONING_EFFORT_LEVELS,
-    supportsAutoMode: true,
-  },
-  {
     value: "haiku",
     displayName: "Haiku",
     description: "Fastest for quick answers",
-  },
-  {
-    value: "opusplan",
-    displayName: "Opus Plan Mode",
-    description: "Use Opus in plan mode, Sonnet otherwise",
   },
 ];
 
 /**
  * Story 068 (R1, R1.1, R2) — the REAL per-alias context window, keyed by the EXACT {@link MODEL_CATALOG}
- * `value`. These windows are NOT uniform: `opus` is natively 1M, `sonnet`/`haiku` are 200K, and
- * `sonnet[1m]` is the explicit 1M variant. This map is the single source of truth that
- * `inferContextWindowFromModel` (acp-agent.ts) consults BEFORE the `\b1m\b` regex fallback — the bug it
- * fixes is `opus` having wrongly reported 200K (the regex only ever matched the literal `1m` token).
+ * `value`. These windows are NOT uniform: `default`/`fable5`/`opus`/`sonnet` are natively 1M and `haiku`
+ * is 200K. This map is the single source of truth that `inferContextWindowFromModel` (acp-agent.ts)
+ * consults BEFORE the `\b1m\b` regex fallback — the bug it fixes is `opus` having wrongly reported 200K
+ * (the regex only ever matched the literal `1m` token).
  *
- * Story 069 (R2): `default` and `opusplan` seed to 1M — `default` is the recommended Opus (the claude TUI's
- * `/model default` resolves to `claude-opus-4-8[1m]`, a 1M model) and `opusplan` plans with Opus. This is
- * only the PRE-FIRST-TURN seed: once a turn arrives, `inferContextWindowFromModelId` (story 069)
- * AUTHORITATIVELY refines the window from the transcript's real `model`. Keys MIRROR `MODEL_CATALOG`
- * `value`s; the drift guard lives in the test (068 anti-drift: every catalog value has an explicit entry).
+ * `sonnet` seeds to 1M because plain `sonnet` now resolves to Sonnet 5, which is natively 1M (the
+ * redundant `sonnet[1m]` alias was dropped). `default` is the recommended Opus (the claude TUI's `/model
+ * default` resolves to `claude-opus-4-8[1m]`, a 1M model) and `fable5` is Fable 5 (1M). This is only the
+ * PRE-FIRST-TURN seed: once a turn arrives, `inferContextWindowFromModelId` (story 069) AUTHORITATIVELY
+ * refines the window from the transcript's real `model`. Keys MIRROR `MODEL_CATALOG` `value`s; the drift
+ * guard lives in the test (068 anti-drift: every catalog value has an explicit entry).
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   default: 1_000_000,
+  fable5: 1_000_000,
   opus: 1_000_000,
-  sonnet: 200_000,
-  "sonnet[1m]": 1_000_000,
+  sonnet: 1_000_000,
   haiku: 200_000,
-  opusplan: 1_000_000,
 };
 
 /**
@@ -153,20 +152,20 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
  * cannot derive the concrete version (the SDK `supportedModels()` was cut), so these MIRROR the LIVE
  * picker and MUST be re-verified on each model launch (source: the user's live `/model` output). The
  * static tagline stays on `ModelInfo.description` (069 R3 untouched); this only prepends "<version> · ".
- * `opusplan` is intentionally absent — its tagline ("Use Opus in plan mode, Sonnet otherwise") already
- * names the models, so it renders bare.
+ * Every current catalog entry carries a label; the no-label branch in {@link modelSelectorDescription}
+ * stays as a total-function safeguard for any future label-less entry.
  */
 export const MODEL_VERSION_LABELS: Record<string, string> = {
   default: "Opus 4.8 with 1M context",
+  fable5: "Fable 5 with 1M context",
   opus: "Opus 4.8 with 1M context",
-  sonnet: "Sonnet 5",
-  "sonnet[1m]": "Sonnet 5 with 1M context",
+  sonnet: "Sonnet 5 with 1M context",
   haiku: "Haiku 4.5",
 };
 
 /**
  * Story 072 — compose the Zed selector description: "<version label> · <tagline>", or the bare tagline
- * when no label exists (e.g. `opusplan`). PURE + TOTAL: never throws on a missing label or tagline.
+ * when no label exists. PURE + TOTAL: never throws on a missing label or tagline.
  */
 export function modelSelectorDescription(info: ModelInfo): string {
   const label = MODEL_VERSION_LABELS[info.value];

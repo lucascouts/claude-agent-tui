@@ -1,7 +1,7 @@
 // Story 046 / Task 2.1 — the static curated model catalog (R1.1, R2.1).
 //
 // CONTRACT (story.md R1.1 / R2.1 + design.md §5/§7): a new `model-catalog.ts` exports a static
-// curated `ModelInfo[]` of TUI-accepted aliases — `default`, `sonnet`, `opus`, `haiku`, `opusplan` —
+// curated `ModelInfo[]` of TUI-accepted aliases — `default`, `fable5`, `opus`, `sonnet`, `haiku` —
 // replacing the single static `[DEGRAU1_DEFAULT_MODEL_INFO]`. `default` stays a safe fallback entry.
 // Effort-capable entries declare `supportsEffort` + a non-empty `supportedEffortLevels` (which is what
 // unlocks the effort selector via `buildConfigOptions`, design §7). This file pins the catalog as a
@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MODEL_CATALOG } from "../dist/model-catalog.js";
 
-const EXPECTED_ALIASES = ["default", "sonnet", "opus", "haiku", "opusplan"];
+const EXPECTED_ALIASES = ["default", "fable5", "opus", "sonnet", "haiku"];
 
 test("2.1 catalog: exports more than the single static entry (R1.1 — was 1 item)", () => {
   assert.ok(Array.isArray(MODEL_CATALOG), "MODEL_CATALOG is an array of ModelInfo");
@@ -55,8 +55,8 @@ test("2.1 catalog: at least one entry declares effort support — unlocks the ef
 });
 
 test("2.1 catalog: a non-effort model does NOT advertise effort levels (effort stays hidden for it)", () => {
-  // `haiku`/`opusplan` are the genuine non-effort models — they must not claim effort support, else
-  // the effort selector would appear for a model that can't honor it. (Story 056: `default` NOW
+  // `haiku` is the genuine non-effort model — it must not claim effort support, else the effort
+  // selector would appear for a model that can't honor it. (Story 056: `default` NOW
   // advertises effort for v0.52 parity — pinned by model-catalog-effort.test.ts.)
   const haiku = MODEL_CATALOG.find((m) => m.value === "haiku");
   assert.ok(haiku, "haiku entry present");

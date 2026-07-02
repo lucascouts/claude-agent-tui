@@ -4117,9 +4117,9 @@ export function runAcp(deps?: AgentDeps) {
  *  not call), as detailed below.
  *
  *  Story 068 (R1, R1.1, R1.2): consults the static {@link MODEL_CONTEXT_WINDOWS}
- *  alias→window map FIRST (an exact catalog-`value` hit — `opus`=1M, `sonnet`=200K,
- *  `sonnet[1m]`=1M, `haiku`=200K, `default`/`opusplan`=200K conservative). This
- *  fixes `opus` having wrongly reported 200K. An alias absent from the map then
+ *  alias→window map FIRST (an exact catalog-`value` hit — `default`/`fable5`/`opus`/
+ *  `sonnet`=1M, `haiku`=200K). This fixes `opus` having wrongly reported 200K, and
+ *  `sonnet` now seeds 1M (Sonnet 5 is native 1M). An alias absent from the map then
  *  falls back to the legacy `\b1m\b` inference: Anthropic 1M-context variants
  *  encode "1m" as a distinct token in the SDK model ID (e.g., "claude-opus-4-6-1m"),
  *  which `\b1m\b` catches without also matching "10m" or embedded substrings.
