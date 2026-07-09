@@ -27,7 +27,7 @@ test("fork origin: records the redirect from the old zed-industries/claude-code-
   assert.equal(p.redirectFrom, "zed-industries/claude-code-acp");
 });
 
-test("fork origin: checked-out tag is v0.53.0 (R1.1)", () => {
+test("fork origin: checked-out tag is v0.57.0 (R1.1)", () => {
   const p = readProvenance();
-  assert.equal(p.tag, "v0.53.0");
+  assert.equal(p.tag, "v0.57.0");
 });

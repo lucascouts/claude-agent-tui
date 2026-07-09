@@ -102,9 +102,11 @@ test("R1 classifyFastModeSignal: other gate reasons (subscription/org/api-only) 
 // A fake pty that, once `/fast` is submitted, feeds `panel` to the probe's onData listener (the real
 // TUI's response). This drives the REAL defaultFastModeProbe glue (open panel → collect → classify →
 // Esc) without a live binary; R7.3 is the end-to-end proof on a genuinely fast-available account.
-function makeSignalPty(panel: string) {
+function makeSignalPty(panel: string, opts: { emitAfterInjects?: number } = {}) {
+  const emitAfter = opts.emitAfterInjects ?? 1;
   let onData: ((d: string) => void) | undefined;
-  let fired = false;
+  let injects = 0;
+  let emitted = false;
   const writes: string[] = [];
   return {
     onExit: () => ({ dispose() {} }),
@@ -119,8 +121,9 @@ function makeSignalPty(panel: string) {
     resize: () => {},
     write: (d: string) => {
       writes.push(d);
-      if (!fired && writes.join("").includes("/fast")) {
-        fired = true;
+      if (d.includes("/fast")) injects++; // each openPanel() = one `/fast` payload write
+      if (!emitted && injects >= emitAfter) {
+        emitted = true;
         if (panel) setTimeout(() => onData?.(panel), 5);
       }
     },
@@ -144,6 +147,17 @@ test("R1 driveFastModeProbe (opt-in) drives `/fast` and returns true on an avail
 
 test("R1.2 driveFastModeProbe fails closed on a broken pty (returns false)", async () => {
   assert.equal(await driveFastModeProbe({ pty: {} as never, cwd: "/x" }), false);
+});
+
+test("R1 driveFastModeProbe re-injects `/fast` when the first inject is swallowed (createSession race)", async () => {
+  // The panel renders ONLY after the 2nd `/fast` — models a session-start TUI that was not input-ready
+  // for the first inject. The probe must re-open and still resolve `available`.
+  const pty = makeSignalPty(AVAILABLE_PANEL, { emitAfterInjects: 2 });
+  assert.equal(await driveFastModeProbe({ pty, cwd: "/x" }), true);
+  const injects = (pty as unknown as { _writes: string[] })._writes.filter((w) =>
+    w.includes("/fast"),
+  ).length;
+  assert.ok(injects >= 2, `expected a re-inject (>=2 /fast writes), got ${injects}`);
 });
 
 // ---- Harness (effort-apply precedent + injected fastModeProbe) ----------------------------------
@@ -197,10 +211,12 @@ async function newSession(
   t: Parameters<NonNullable<Parameters<typeof test>[0]>>[0],
   startEngine: unknown,
   fastModeProbe: () => boolean | Promise<boolean>,
+  extraDeps: Record<string, unknown> = {},
 ) {
   const agent = new ClaudeAcpAgent(makeClient(), undefined, undefined, {
     startEngine: startEngine as never,
     fastModeProbe: fastModeProbe as never,
+    ...extraDeps,
   });
   t.after(() => agent.dispose());
   const response = await (
@@ -236,6 +252,12 @@ test("R2.1 fast toggle surfaces (Off/On) AFTER the model selector on an Opus mod
   assert.equal((fast as { type?: string }).type, "select");
   assert.deepEqual((fast!.options ?? []).map((o) => o.value), ["off", "on"], "Off/On options");
   assert.equal(fast!.currentValue, "off", "defaults to off");
+  // Tooltip (R7.3 finding): the selector AND each Off/On option carry a description, mirroring `model`
+  // (Zed renders the selected option's description as the selector tooltip).
+  assert.ok((fast as { description?: string }).description, "selector has a description");
+  for (const o of fast!.options ?? []) {
+    assert.ok((o as { description?: string }).description, `option ${o.value} has a description`);
+  }
   const modelIdx = opts.findIndex((o) => o.id === "model");
   const fastIdx = opts.findIndex((o) => o.id === "fast");
   assert.ok(fastIdx > modelIdx, "the fast toggle is positioned AFTER the model selector");
@@ -274,6 +296,23 @@ test("R3.1 toggling fast back to Off injects `/fast off`", async (t) => {
   await setOption(agent, sessionId, "fast", "off");
   assert.match(fake.writes.join(""), /\/fast off/, "expected a live /fast off inject");
   assert.equal(fastOption(sessions, sessionId)!.currentValue, "off");
+});
+
+test("R3.1 a fast inject schedules a confirm Enter for the `/fast` panel (claude 2.1.201)", async (t) => {
+  // `/fast on|off` is a local-jsx command that opens a confirmation panel and leaves it open — the arg
+  // pre-selects but does NOT auto-apply. Like /model's "Switch?" dialog, injectFastCommand schedules ONE
+  // confirm Enter after the command; without it the toggle no-ops (story 073 R7.3 live-proof). An
+  // immediate `schedule` runs it synchronously here.
+  const fake = makeStartEngine();
+  const { agent, sessionId } = await newSession(t, fake.startEngine, () => true, {
+    schedule: (fn: () => void) => fn(),
+  });
+  fake.writes.length = 0;
+  await setOption(agent, sessionId, "fast", "on");
+  assert.match(fake.writes.join(""), /\/fast on/, "expected the /fast on write");
+  const enters = fake.writes.filter((w) => w === "\r").length;
+  assert.equal(enters, 2, `expected a submit \\r + a panel-confirm \\r (2 total), got ${enters}`);
+  assert.equal(fake.writes[fake.writes.length - 1], "\r", "the panel-confirm Enter must trail the inject");
 });
 
 test("R3.3 a fast change does NOT re-spawn (no new startEngine call)", async (t) => {
@@ -315,4 +354,93 @@ test("R4.2 switching back to Opus re-probes and re-advertises the toggle as off"
   const fast = fastOption(sessions, sessionId);
   assert.ok(fast, "toggle re-advertised on return to Opus");
   assert.equal(fast!.currentValue, "off", "re-advertised as off (switching turned it off)");
+});
+
+// ---- Story 074 (#828) — config-option surface reconcile (boolean negotiation, PTY mechanism kept) --
+//
+// The apply path is unchanged (live `/fast on|off` inject + confirm Enter); story 074 only aligns the
+// ACP *type negotiation* and lets set_config_option accept a boolean payload as well as the on/off
+// string. These integration tests drive the real agent through the fake pty, so they prove the boolean
+// payload reaches the SAME injectFastCommand seam and that a client advertising boolean config options
+// gets a `type:"boolean"` fast option whose currentValue tracks the toggle.
+
+/** setSessionConfigOption with a raw (boolean OR string) value — setOption forces `string`. */
+const setOptionRaw = (agent: ClaudeAcpAgent, sessionId: string, configId: string, value: unknown) =>
+  (
+    agent as unknown as {
+      setSessionConfigOption: (p: {
+        sessionId: string;
+        configId: string;
+        value: unknown;
+      }) => Promise<unknown>;
+    }
+  ).setSessionConfigOption({ sessionId, configId, value });
+
+/** Build a session whose client advertised boolean config options (set before the fast probe rebuild). */
+async function newSessionWithBooleanCaps(
+  t: Parameters<NonNullable<Parameters<typeof test>[0]>>[0],
+  startEngine: unknown,
+) {
+  const agent = new ClaudeAcpAgent(makeClient(), undefined, undefined, {
+    startEngine: startEngine as never,
+    fastModeProbe: (() => true) as never,
+  });
+  t.after(() => agent.dispose());
+  (agent as unknown as { clientCapabilities?: unknown }).clientCapabilities = {
+    session: { configOptions: { boolean: {} } },
+  };
+  const response = await (
+    agent as unknown as { createSession: (p: unknown) => Promise<{ sessionId: string }> }
+  ).createSession({ cwd: "/work/dir", mcpServers: [] });
+  await tick();
+  const sessions = (agent as unknown as { sessions: Record<string, SessionShape> }).sessions;
+  return { agent, sessionId: response.sessionId, sessions };
+}
+
+test("4.2 a boolean `true` payload injects `/fast on` (same seam as the on/off string)", async (t) => {
+  const fake = makeStartEngine();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, () => true);
+  fake.writes.length = 0;
+  await setOptionRaw(agent, sessionId, "fast", true);
+  assert.match(fake.writes.join(""), /\/fast on/, "boolean true → live /fast on inject");
+  assert.equal(sessions[sessionId].fastModeOn, true, "session fast state enabled");
+});
+
+test("4.2 a boolean `false` payload injects `/fast off`", async (t) => {
+  const fake = makeStartEngine();
+  const { agent, sessionId, sessions } = await newSession(t, fake.startEngine, () => true);
+  await setOptionRaw(agent, sessionId, "fast", true);
+  fake.writes.length = 0;
+  await setOptionRaw(agent, sessionId, "fast", false);
+  assert.match(fake.writes.join(""), /\/fast off/, "boolean false → live /fast off inject");
+  assert.equal(sessions[sessionId].fastModeOn, false, "session fast state disabled");
+});
+
+test("4.2 boolean true and string 'on' resolve to the SAME enabled state", async (t) => {
+  const fakeB = makeStartEngine();
+  const b = await newSession(t, fakeB.startEngine, () => true);
+  await setOptionRaw(b.agent, b.sessionId, "fast", true);
+
+  const fakeS = makeStartEngine();
+  const s = await newSession(t, fakeS.startEngine, () => true);
+  await setOptionRaw(s.agent, s.sessionId, "fast", "on");
+
+  assert.equal(
+    b.sessions[b.sessionId].fastModeOn,
+    s.sessions[s.sessionId].fastModeOn,
+    "boolean and string payloads converge on the same fast state",
+  );
+  assert.equal(b.sessions[b.sessionId].fastModeOn, true);
+});
+
+test("4.1 a client that advertises boolean config options gets a type:'boolean' fast option", async (t) => {
+  const fake = makeStartEngine();
+  const { agent, sessionId, sessions } = await newSessionWithBooleanCaps(t, fake.startEngine);
+  const fast = fastOption(sessions, sessionId) as any;
+  assert.ok(fast, "fast option advertised on the seeded Opus model");
+  assert.equal(fast.type, "boolean", "boolean negotiation when the client advertised it");
+  assert.equal(fast.currentValue, false, "seeded off, as a boolean");
+
+  await setOptionRaw(agent, sessionId, "fast", true);
+  assert.equal(fastOption(sessions, sessionId)!.currentValue, true, "boolean currentValue tracks the toggle");
 });

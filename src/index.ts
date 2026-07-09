@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { resolveSettings } from "@anthropic-ai/claude-agent-sdk";
-import { runAcp } from "./acp-agent.js";
+import { runAcp, driveFastModeProbe } from "./acp-agent.js";
 import { resolveClaudePath } from "./claude-path.js";
 import { usageUpdateEnabled } from "./usage-env.js";
 import { liveDiffEnabled } from "./live-diff-env.js";
@@ -104,7 +104,27 @@ if (process.argv.includes("--cli")) {
   // fallback and never spawns the real binary. `??=` keeps a user opt-out (`FORK_AGENT_PROBE=0`).
   process.env.FORK_AGENT_PROBE ??= "1";
 
-  const { connection, agent } = runAcp({ usageUpdate, gate, liveDiff, liveSubagentWatch });
+  // Story 073 (R1 / R7.3): OPT-IN live fast-mode detector. OFF by default — driveFastModeProbe writes
+  // `/fast` to the PTY at session start, which would break the read-only-load (R4.3)/no-Ctrl+U invariants
+  // as a default (see ## Spike findings). `FAST_MODE_LIVE=1` wires it for the manual R7.3 live-proof (and
+  // is the candidate seam for the idle-gated wiring follow-up). Unset → the fail-closed default stands.
+  // `FAST_MODE_FORCE=1` force-advertises the toggle WITHOUT probing (skips the account gate) — the R7.3
+  // UI proof on a gated account: it makes the selector render (position/tooltip/hide-on-non-Opus) even
+  // when fast credits are absent. It does NOT make fast actually work — toggling On still hits the gate.
+  const fastModeProbe =
+    process.env.FAST_MODE_FORCE === "1"
+      ? () => true
+      : process.env.FAST_MODE_LIVE === "1"
+        ? driveFastModeProbe
+        : undefined;
+
+  const { connection, agent } = runAcp({
+    usageUpdate,
+    gate,
+    liveDiff,
+    liveSubagentWatch,
+    fastModeProbe,
+  });
 
   async function shutdown() {
     await agent.dispose().catch((err) => {

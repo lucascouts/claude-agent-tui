@@ -13,6 +13,7 @@
 // PURE DATA — no spawn, no agent, no `claude`. `ModelInfo` is the SDK shape from
 // `@anthropic-ai/claude-agent-sdk` (the same type `acp-agent.ts` builds its model list from).
 import type { ModelInfo } from "@anthropic-ai/claude-agent-sdk";
+import type { ClientCapabilities, SessionConfigOption } from "@agentclientprotocol/sdk";
 
 /**
  * Effort levels offered for reasoning-capable models — the SDK's `supportedEffortLevels` vocabulary.
@@ -191,6 +192,75 @@ export function isFastModeCapableModel(value: string): boolean {
   return FAST_MODE_MODELS.has(value);
 }
 
+// --- Story 074 / #828 — fast-mode config-option surface (reconcile with upstream v0.57) ----------
+// Upstream #828 exports the fast-mode identity as constants, negotiates `type:"boolean"` when the
+// client advertises it (select fallback otherwise), and resolves a boolean OR on/off payload. The fork
+// adopts that SURFACE while keeping its PTY `/fast on|off` inject and the FAST_MODE_MODELS gate (the
+// SDK `applyFlagSettings`/`fast_mode_state`/`cooldown` reconcile has no PTY equivalent — CUT).
+
+/** Story 074 (R4.2) — the fork's fast-mode config-option id, replacing the inline `"fast"` literal. */
+export const FAST_MODE_CONFIG_ID = "fast";
+/** Story 074 (R4.2) — the on/off select values, replacing the inline `"on"`/`"off"` literals. */
+export const FAST_MODE_ON = "on";
+export const FAST_MODE_OFF = "off";
+
+/**
+ * Story 074 (R4.1) — did the client advertise support for boolean session config options
+ * (`clientCapabilities.session.configOptions.boolean`)? A present (non-null) object — even `{}` —
+ * means the agent may emit `type:"boolean"` entries and the client may send boolean `set_config_option`
+ * values. Read from the `initialize()`-stored capabilities; NO createSession/prompt touch (R4.5).
+ */
+export function clientSupportsBooleanConfigOptions(caps?: ClientCapabilities | null): boolean {
+  return caps?.session?.configOptions?.boolean != null;
+}
+
+/**
+ * Story 074 (R4.3) — resolve the intended fast-mode ENABLED state from a `set_config_option` payload
+ * that may be a boolean (a client using the boolean option) OR the `"on"`/`"off"` string (the select
+ * fallback). Any non-`"on"` string (and any other shape) resolves to OFF — a toggle never half-applies.
+ */
+export function resolveFastModeEnabled(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  return value === FAST_MODE_ON;
+}
+
+/**
+ * Story 074 (R4.1) — build the `fast` config option. Emits `type:"boolean"` (currentValue tracks the
+ * toggle) when the client advertised boolean config options, else the `on`/`off` select fallback. The
+ * external ACP `id` and on/off values are unchanged from story 073; only the type negotiation aligns
+ * with upstream #828. The PTY `/fast on|off` inject mechanism and the FAST_MODE_MODELS gate are kept.
+ */
+export function createFastModeConfigOption(
+  enabled: boolean,
+  useBooleanOption: boolean,
+): SessionConfigOption {
+  const base = {
+    id: FAST_MODE_CONFIG_ID,
+    name: "Fast Mode",
+    description:
+      "Faster Opus output at a higher usage-credit rate (/fast). Turns off on non-Opus models.",
+    category: "model" as const,
+  };
+  if (useBooleanOption) {
+    return { ...base, type: "boolean", currentValue: enabled };
+  }
+  return {
+    ...base,
+    type: "select",
+    currentValue: enabled ? FAST_MODE_ON : FAST_MODE_OFF,
+    // Per-option descriptions mirror the `model` selector — Zed renders the selected option's
+    // description as the selector tooltip (an omitted per-option description shows no tooltip).
+    options: [
+      { value: FAST_MODE_OFF, name: "Off", description: "Standard Opus output speed." },
+      {
+        value: FAST_MODE_ON,
+        name: "On",
+        description: "Faster Opus output — draws from usage credits at a higher rate.",
+      },
+    ],
+  };
+}
+
 /**
  * Story 073 (R1) — the verdict of parsing the `/fast` panel captured from the live PTY:
  *   - `"available"`   — the panel rendered its On/Off toggle (no gate line) → advertise the toggle.
@@ -206,10 +276,15 @@ export type FastModeSignal = "available" | "unavailable" | "pending";
  * sequences, never printable bytes) so a marker can never be split apart by cursor-addressing codes.
  */
 function stripControlSequences(raw: string): string {
+  // Control chars in these regexes are intentional: we are matching ANSI/OSC
+  // escape sequences (ESC/BEL), never printable text, so no-control-regex is
+  // suppressed by design.
+  /* eslint-disable no-control-regex */
   return raw
     .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC ...BEL / ST
     .replace(/\x1b[@-Z\\-_]/g, "") // 2-byte ESC (Fe)
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, ""); // CSI ...final
+  /* eslint-enable no-control-regex */
 }
 
 /**

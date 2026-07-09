@@ -124,6 +124,12 @@ import {
   DEFAULT_MODEL_INFO,
   isFastModeCapableModel,
   classifyFastModeSignal,
+  FAST_MODE_CONFIG_ID,
+  FAST_MODE_ON,
+  FAST_MODE_OFF,
+  createFastModeConfigOption,
+  clientSupportsBooleanConfigOptions,
+  resolveFastModeEnabled,
   ULTRACODE_EFFORT,
   ULTRACODE_EFFORT_LEVEL,
   ULTRACODE_EFFORT_LABEL,
@@ -540,9 +546,12 @@ export const defaultFastModeProbe: FastModeProbe = () => false;
 
 /** Story 073 (R1) — bounded window the live driver waits for the `/fast` panel to render before failing
  *  closed, polled every {@link FAST_PROBE_POLL_MS}. Generous because at session start the TUI needs a
- *  beat to become input-ready; the manual R7.3 live-proof tunes it against a fast-available account. */
-const FAST_PROBE_WINDOW_MS = 4000;
-const FAST_PROBE_POLL_MS = 100;
+ *  beat to become input-ready. While still pending, the `/fast` inject is re-sent every
+ *  {@link FAST_PROBE_REINJECT_MS} — a session-start TUI can swallow the first inject before it is
+ *  input-ready (the createSession race the R7.3 live-proof surfaced), so a single inject would miss it. */
+const FAST_PROBE_WINDOW_MS = 6000;
+const FAST_PROBE_POLL_MS = 150;
+const FAST_PROBE_REINJECT_MS = 2000;
 
 /**
  * Story 073 (R1) — the OPT-IN live fast-mode detector (Task 1 spike + Task 3.1 parser). Opens the
@@ -567,14 +576,24 @@ export const driveFastModeProbe: FastModeProbe = async ({ pty }) => {
     });
     // Open the panel with the SAME seam every live inject uses (Ctrl+U clear + `/fast` + \r). Safe ONLY on
     // an idle input box; interactive-only, so billing is untouched (R3.3).
-    sendPrompt(pty, "/fast", (fn) => fn());
+    const openPanel = () => {
+      sendPrompt(pty, "/fast", (fn) => fn());
+    };
+    openPanel();
     const deadline = Date.now() + FAST_PROBE_WINDOW_MS;
+    let nextReinject = Date.now() + FAST_PROBE_REINJECT_MS;
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, FAST_PROBE_POLL_MS));
       const verdict = classifyFastModeSignal(buffer);
       if (verdict === "available") return true;
       if (verdict === "unavailable") return false;
-      // "pending" → the panel has not rendered a decisive line yet; keep polling within the window
+      // "pending" → the panel has not rendered a decisive line yet. A session-start TUI may have swallowed
+      // the inject before it was input-ready, so re-open periodically until it takes. We ONLY re-inject
+      // while pending (no panel rendered), so an already-open panel is never disturbed.
+      if (Date.now() >= nextReinject) {
+        openPanel();
+        nextReinject = Date.now() + FAST_PROBE_REINJECT_MS;
+      }
     }
     return false; // window elapsed without a decisive panel → fail closed (R1.2)
   } catch {
@@ -1963,6 +1982,28 @@ export class ClaudeAcpAgent implements Agent {
     if (!session) {
       throw new Error("Session not found");
     }
+    // Story 074 (#828, R4.3): the `fast` option may be advertised as a boolean (when the client
+    // advertised boolean config options) OR as the on/off select. A boolean payload has no select
+    // `options` to validate against and would trip the string-only guard below — resolve it directly and
+    // apply it via the SAME PTY `/fast on|off` inject (mechanism unchanged), then reflect the toggle in
+    // the option's currentValue (boolean or on/off, matching how it was advertised). The on/off STRING
+    // payload still flows through the generic select validation below. NO createSession/prompt touch.
+    if (params.configId === FAST_MODE_CONFIG_ID && typeof params.value === "boolean") {
+      const option = session.configOptions.find((o) => o.id === FAST_MODE_CONFIG_ID);
+      if (!option) {
+        throw new Error(`Unknown config option: ${params.configId}`);
+      }
+      const enabled = resolveFastModeEnabled(params.value);
+      this.applyFastModeChange(session, enabled);
+      session.configOptions = session.configOptions.map((o) =>
+        o.id === FAST_MODE_CONFIG_ID
+          ? o.type === "boolean"
+            ? { ...o, currentValue: enabled }
+            : { ...o, currentValue: enabled ? FAST_MODE_ON : FAST_MODE_OFF }
+          : o,
+      );
+      return { configOptions: session.configOptions };
+    }
     if (typeof params.value !== "string") {
       throw new Error(`Invalid value for config option ${params.configId}: ${params.value}`);
     }
@@ -2048,11 +2089,12 @@ export class ClaudeAcpAgent implements Agent {
       // in-place re-spawn carrying `--agent` (mirrors effort). On throw, applyConfigOptionValue below is
       // skipped so the prior currentValue stays unchanged (R3.7-style failure path).
       await this.applyAgentChange(params.sessionId, session, resolvedValue);
-    } else if (params.configId === "fast") {
+    } else if (params.configId === FAST_MODE_CONFIG_ID) {
       // Story 073 (R3): fast mode is a LIVE `/fast on|off` inject (mirrors /effort — no re-spawn, works
       // pre-first-interaction, defers mid-turn). It never throws, so applyConfigOptionValue below always
-      // commits the new currentValue (optimistic, like /effort).
-      this.applyFastModeChange(session, resolvedValue);
+      // commits the new currentValue (optimistic, like /effort). This is the SELECT (on/off string)
+      // path; a boolean payload is resolved earlier (story 074, R4.3). resolveFastModeEnabled unifies both.
+      this.applyFastModeChange(session, resolveFastModeEnabled(resolvedValue));
     }
 
     await this.applyConfigOptionValue(params.sessionId, session, params.configId, resolvedValue);
@@ -2446,27 +2488,36 @@ export class ClaudeAcpAgent implements Agent {
    * Story 073 (R3) — apply a fast-mode toggle LIVE via `/fast on|off`, mirroring {@link applyEffortChange}
    * exactly: a side-channel PTY write, no re-spawn, no turn, works before the first interaction. A no-op
    * (same on/off state) applies nothing; mid-turn it defers (pendingFastInjection) and flushes when the
-   * turn settles. `value` is the selector's `"on"`/`"off"`. NO billing/spawn/credential change (R3.3).
+   * turn settles. `enabled` is the resolved boolean state (story 074 R4.3 — resolveFastModeEnabled maps
+   * a boolean payload OR the on/off string to it). NO billing/spawn/credential change (R3.3).
    */
-  private applyFastModeChange(session: Session, value: string): void {
-    const on = value === "on";
-    if (on === (session.fastModeOn ?? false)) return; // no value change → no-op
-    session.fastModeOn = on;
+  private applyFastModeChange(session: Session, enabled: boolean): void {
+    if (enabled === (session.fastModeOn ?? false)) return; // no state change → no-op
+    session.fastModeOn = enabled;
     if (session.turnDetector !== undefined) {
       // A turn is in flight — injecting mid-turn corrupts the PTY input. Defer (mirrors /effort, /model).
-      session.pendingFastInjection = on;
+      session.pendingFastInjection = enabled;
       return;
     }
-    this.injectFastCommand(session, on);
+    this.injectFastCommand(session, enabled);
   }
 
   /**
-   * Side-channel `/fast on|off` write — synchronous, resolves immediately (never a turn). Like `/effort`
-   * (and unlike `/model`), fast mode applies INLINE with no blocking "Switch?" dialog, so sendPrompt's
-   * own submit `\r` suffices and NO confirm Enter is scheduled.
+   * Side-channel `/fast on|off` write — synchronous, resolves immediately (never a turn). In claude
+   * 2.1.201 `/fast` is a `local-jsx` command: `/fast on|off` opens the "Fast mode (research preview)"
+   * confirmation panel (`tengu_fast_mode_picker_shown`) and leaves it OPEN — the arg pre-selects the
+   * target but does NOT auto-apply. So, exactly like {@link injectModelCommand}'s "Switch model?"
+   * dialog, schedule ONE blind confirm Enter once the panel has rendered; if no panel appears (same
+   * state / flag flipped) Enter-on-empty-input is a harmless no-op. (Superseded the earlier INLINE
+   * assumption, which left the panel unconfirmed so the toggle never took — story 073 R7.3 live-proof.)
    */
   private injectFastCommand(session: Session, on: boolean): void {
     sendPrompt(session.pty, on ? "/fast on" : "/fast off", (fn) => fn());
+    // Confirm the fast-mode panel — blind + scheduled, mirroring the /model "Switch?" confirm.
+    this.schedule(() => {
+      if (session.engine?.isDisposed) return; // PTY exited meanwhile → nothing to confirm
+      session.pty.write("\r");
+    }, MODEL_CONFIRM_DELAY_MS);
   }
 
   /**
@@ -2523,6 +2574,7 @@ export class ClaudeAcpAgent implements Agent {
       currentAgent,
       session.fastModeAvailable ?? false,
       session.fastModeOn ?? false,
+      clientSupportsBooleanConfigOptions(this.clientCapabilities),
     );
   }
 
@@ -3184,6 +3236,7 @@ export class ClaudeAcpAgent implements Agent {
         currentAgent,
         session.fastModeAvailable ?? false,
         session.fastModeOn ?? false,
+        clientSupportsBooleanConfigOptions(this.clientCapabilities),
       );
 
       // Story 073 (R4.2) — on a switch TO an Opus model, re-run availability detection out of band and
@@ -3585,6 +3638,7 @@ function buildConfigOptions(
   currentAgent?: string,
   fastAvailable = false,
   currentFast = false,
+  fastUsesBooleanOption = false,
 ): SessionConfigOption[] {
   const options: SessionConfigOption[] = [
     {
@@ -3620,21 +3674,11 @@ function buildConfigOptions(
   // Story 073 (R2) — the fast-mode toggle, positioned right after the model selector. GATED on an
   // Opus alias (R2.2, isFastModeCapableModel) AND detected availability (R1, fastAvailable): fast mode
   // is Opus-only and account-gated, so a non-Opus model or an unavailable account omits it entirely.
-  // `category:"model"` is a best-guess pending the R7.3 live-proof (the exact category Zed expects for
-  // fast mode is not knowable offline). currentValue mirrors the session's fast-mode state.
+  // Story 074 (#828, R4.1): the option is emitted as `type:"boolean"` when the client advertised
+  // boolean config options (fastUsesBooleanOption), else the `on`/`off` select fallback — via the
+  // model-catalog helper. currentValue mirrors the session's fast-mode state.
   if (isFastModeCapableModel(currentModelId) && fastAvailable) {
-    options.push({
-      id: "fast",
-      name: "Fast Mode",
-      description: "Faster Opus output (/fast)",
-      category: "model",
-      type: "select",
-      currentValue: currentFast ? "on" : "off",
-      options: [
-        { value: "off", name: "Off" },
-        { value: "on", name: "On" },
-      ],
-    });
+    options.push(createFastModeConfigOption(currentFast, fastUsesBooleanOption));
   }
 
   // Add effort level option based on the currently selected model
@@ -3982,6 +4026,11 @@ export function toAcpNotifications(
   const registerHooks = options?.registerHooks !== false;
   const supportsTerminalOutput = options?.clientCapabilities?._meta?.["terminal_output"] === true;
   if (typeof content === "string") {
+    // Story 074 (#841): an empty full-string content block must emit NO message chunk
+    // (an empty agent_message_chunk breaks strict ACP clients — e.g. JetBrains Air
+    // freezes the transcript). Mirrors the empty-thinking guard (#793). The
+    // `case "text"`/`text_delta` block path stays DEAD (no content_block_delta, 034).
+    if (content.length === 0) return [];
     const update: SessionNotification["update"] = {
       sessionUpdate: role === "assistant" ? "agent_message_chunk" : "user_message_chunk",
       content: {

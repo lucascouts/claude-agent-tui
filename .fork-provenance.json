@@ -2,8 +2,8 @@
   "url": "https://github.com/agentclientprotocol/claude-agent-acp.git",
   "org": "agentclientprotocol/claude-agent-acp",
   "redirectFrom": "zed-industries/claude-code-acp",
-  "tag": "v0.53.0",
-  "sha": "47fee477096f9edd4aeb994679658fb0914cc0c0",
+  "tag": "v0.57.0",
+  "sha": "2bf865eb42bbe744c476d38a005444eab8f4b624",
   "tagShaVerified": true,
   "upstreamDependencyKeys": ["@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "zod"],
   "externalRuntimeDeps": [

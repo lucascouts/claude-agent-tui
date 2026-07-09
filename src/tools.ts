@@ -149,6 +149,19 @@ interface RawToolUse {
   input?: unknown;
 }
 
+/**
+ * Story 074 (#826) — input shape of the code-review `ReportFindings` tool. A pure
+ * display type (fork-local, no SDK/elicitation coupling): `line` is optional and the
+ * `findings` array may be absent/empty (rendered as "none found").
+ */
+interface ReportFindingsInput {
+  findings?: Array<{
+    file: string;
+    line?: number;
+    summary: string;
+  }>;
+}
+
 export function toolInfoFromToolUse(
   toolUse: RawToolUse,
   supportsTerminalOutput: boolean = false,
@@ -172,6 +185,28 @@ export function toolInfoFromToolUse(
                 },
               ]
             : [],
+      };
+    }
+
+    case "ReportFindings": {
+      // Story 074 (#826): render the code-review ReportFindings tool as a think-kind
+      // label — `Report N finding(s)` with one `file:line — summary` block per finding
+      // (`:line` omitted when absent), or `Report findings: none found` when empty.
+      const input = toolUse.input as ReportFindingsInput | undefined;
+      const findings = input?.findings ?? [];
+      return {
+        title:
+          findings.length > 0
+            ? `Report ${findings.length} finding${findings.length === 1 ? "" : "s"}`
+            : "Report findings: none found",
+        kind: "think",
+        content: findings.map((f) => ({
+          type: "content" as const,
+          content: {
+            type: "text" as const,
+            text: `${f.file}${typeof f.line === "number" ? `:${f.line}` : ""} — ${f.summary}`,
+          },
+        })),
       };
     }
 
