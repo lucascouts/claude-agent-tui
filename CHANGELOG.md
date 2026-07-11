@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.8.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.7.0...v0.8.0) (2026-07-11)
+
+
+### Features
+
+* **073:** fast mode toggle (Opus-only, live /fast inject, detect-before) ([23b296d](https://github.com/lucascouts/claude-agent-tui/commit/23b296daf29a9120515a47e51bbcf08383740d4b))
+* **073:** live /fast signal classifier + opt-in probe (Task 1 spike, Task 3.1) ([7de04c6](https://github.com/lucascouts/claude-agent-tui/commit/7de04c61175ee5e1a502c710b4b132d4a181dfdf))
+* **fork:** add Fable 5 to model selector; drop redundant sonnet[1m] + opusplan ([049e197](https://github.com/lucascouts/claude-agent-tui/commit/049e1977deb9b958060b4b50bd019fc637da9ac6))
+
+
+### Bug Fixes
+
+* eqeqeq-clean null check in clientSupportsBooleanConfigOptions ([0c213e4](https://github.com/lucascouts/claude-agent-tui/commit/0c213e4a7b29257c8d1448c0266862f096af3d0d))
+
 ## [0.7.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.6.0...v0.7.0) (2026-07-02)
 
 
