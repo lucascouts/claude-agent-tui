@@ -44,8 +44,7 @@ export interface RequestPermissionParams {
 
 /** The ACP `RequestPermissionResponse` outcome union. */
 export type RequestPermissionOutcome =
-  | { outcome: "cancelled" }
-  | { outcome: "selected"; optionId: string };
+  { outcome: "cancelled" } | { outcome: "selected"; optionId: string };
 
 /** The ACP `RequestPermissionResponse` the client returns. */
 export interface RequestPermissionResult {

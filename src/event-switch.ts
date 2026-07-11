@@ -191,9 +191,7 @@ export interface DriftClassification {
 
 /** Discriminated union over the `class` field — the result of {@link classifyEvent}. */
 export type EventClassification =
-  | ContentClassification
-  | LifecycleClassification
-  | DriftClassification;
+  ContentClassification | LifecycleClassification | DriftClassification;
 
 /**
  * Narrowing helper: a non-null plain object (mirrors ./jsonl.ts `isObject`). Arrays and `null` are

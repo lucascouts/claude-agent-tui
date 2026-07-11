@@ -82,8 +82,7 @@ export function reassertBillingGuard(event: WatchedMessage, hooks: GuardHooks) {
 
 /** Result of {@link assertEntrypointCli}: the session may proceed, or it must abort (credit-class). */
 export type EntrypointAssertion =
-  | { ok: true; entrypoint: string }
-  | { ok: false; entrypoint: string; reason: string };
+  { ok: true; entrypoint: string } | { ok: false; entrypoint: string; reason: string };
 
 /**
  * Convenience post-spawn assertion (R4.2): given the FIRST observed billing message's entrypoint
