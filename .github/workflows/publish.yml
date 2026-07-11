@@ -53,7 +53,7 @@ jobs:
       - run: npm install -g npm@11.17.0
       - run: npm ci
       - run: npm run build
-      - run: npm publish --provenance --access public --loglevel http
+      - run: npm publish --provenance --access public
 
   bundle-gentoo:
     name: Build and attach Gentoo bundle
