@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  # Manual re-publish path: re-running an old run reuses that commit's workflow,
+  # so a publish-auth fix can only be exercised via dispatch (or the next release).
+  workflow_dispatch:
 
 # Least privilege by default; each job opts into exactly what it needs.
 permissions: {}
@@ -32,7 +35,7 @@ jobs:
     name: Publish to npm
     runs-on: ubuntu-latest
     needs: [release-please]
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
       id-token: write # OIDC for npm trusted publishing + provenance attestation
@@ -47,7 +50,12 @@ jobs:
       - run: npm install -g npm@11.17.0
       - run: npm ci
       - run: npm run build
+      # setup-node's registry-url exports a placeholder NODE_AUTH_TOKEN that
+      # overrides OIDC trusted publishing and turns the PUT into a 404
+      # (github.com/orgs/community/discussions/176761); blank it so npm uses OIDC.
       - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ""
 
   bundle-gentoo:
     name: Build and attach Gentoo bundle
