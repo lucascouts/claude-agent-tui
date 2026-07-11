@@ -4,7 +4,7 @@
 
 An [ACP](https://agentclientprotocol.com)-compatible agent that drives the **Claude Code subscription TUI** over a PTY, so your Claude Code threads render natively in [Zed](https://zed.dev) and other ACP clients.
 
-> **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
+> **Fork** of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.57.0. Where the upstream adapter calls the Claude Agent **SDK**, this fork spawns the `claude` **subscription CLI** in a pseudo-terminal and translates its JSONL transcript into ACP `session/update` notifications. See [`.fork-provenance.json`](.fork-provenance.json) for the exact fork point.
 
 ## Why this exists
 
