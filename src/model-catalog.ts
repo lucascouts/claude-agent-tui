@@ -211,7 +211,8 @@ export const FAST_MODE_OFF = "off";
  * values. Read from the `initialize()`-stored capabilities; NO createSession/prompt touch (R4.5).
  */
 export function clientSupportsBooleanConfigOptions(caps?: ClientCapabilities | null): boolean {
-  return caps?.session?.configOptions?.boolean != null;
+  const booleanCap = caps?.session?.configOptions?.boolean;
+  return booleanCap !== null && booleanCap !== undefined;
 }
 
 /**
