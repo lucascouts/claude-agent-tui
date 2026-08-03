@@ -16,6 +16,16 @@ updates:
       default-days: 7
     allow:
       - dependency-type: "all"
+    # The ACP schema/transport SDK and the Claude Agent SDK are pinned to the exact
+    # versions the tracked upstream (agentclientprotocol/claude-agent-acp) ships at the
+    # fork point recorded in .fork-provenance.json. Three tests enforce it —
+    # fork-deps, fork-install and session-update-union — so a Dependabot bump here
+    # always lands red. These SDKs move only in a fork-sync story, together with the
+    # ported upstream code; see docs/REBASE-AND-DRIFT.md.
+    ignore:
+      - dependency-name: "@agentclientprotocol/sdk"
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
+      - dependency-name: "@anthropic-ai/claude-agent-sdk-*"
     groups:
       minor:
         update-types:
