@@ -16,13 +16,13 @@ const deps = (pkg.dependencies ?? {}) as Record<string, string>;
 
 // --- Task 2.1: kept ACP + reused-SDK deps pinned exactly (no caret/tilde) ---
 
-test("fork deps: @agentclientprotocol/sdk pinned exactly to 1.2.0, no range (R2.1)", () => {
-  assert.equal(deps["@agentclientprotocol/sdk"], "1.2.0");
+test("fork deps: @agentclientprotocol/sdk pinned exactly to 1.3.0, no range (R2.1)", () => {
+  assert.equal(deps["@agentclientprotocol/sdk"], "1.3.0");
   assert.doesNotMatch(deps["@agentclientprotocol/sdk"] ?? "", /[\^~]/);
 });
 
-test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.202, no range (R2.2)", () => {
-  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.202");
+test("fork deps: @anthropic-ai/claude-agent-sdk pinned exactly to 0.3.220, no range (R2.2)", () => {
+  assert.equal(deps["@anthropic-ai/claude-agent-sdk"], "0.3.220");
   assert.doesNotMatch(deps["@anthropic-ai/claude-agent-sdk"] ?? "", /[\^~]/);
 });
 

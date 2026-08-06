@@ -2683,6 +2683,11 @@ export class ClaudeAcpAgent implements Agent {
       if (content === null) return;
     }
 
+    // Story 079 (R4): the same JSONL-hydrated `toolUseResult` the diff block reads below, handed to
+    // the translator so Read/Bash/Agent/WebSearch render from the structured Output. Undefined on a
+    // transcript line that carries no such field — the translator then keeps the raw rendering.
+    const turnToolUseResult = (turn.message as { toolUseResult?: unknown }).toolUseResult;
+
     for (const notification of toAcpNotifications(
       // @ts-expect-error - message.content/role are untyped in the reduced SDK shape
       content,
@@ -2696,6 +2701,7 @@ export class ClaudeAcpAgent implements Agent {
         clientCapabilities: this.clientCapabilities,
         cwd: session?.cwd,
         taskState: session?.taskState,
+        toolUseResult: turnToolUseResult,
       },
     )) {
       await this.client.sessionUpdate(notification);
@@ -2826,6 +2832,9 @@ export class ClaudeAcpAgent implements Agent {
         clientCapabilities: this.clientCapabilities,
         cwd: session?.cwd,
         taskState: session?.taskState,
+        // Story 079 (R4): a nested sidechain row carries its own hydrated `toolUseResult`, so the
+        // sub-agent's Read/Bash results render structured too.
+        toolUseResult: (message as { toolUseResult?: unknown }).toolUseResult,
       },
     );
 
@@ -4020,6 +4029,12 @@ export function toAcpNotifications(
     parentToolUseId?: string | null;
     cwd?: string;
     taskState?: TaskState;
+    // Story 079 (R4): the message-level `toolUseResult` from the JSONL transcript — the structured
+    // Output object of the tool_result this message carries (shape is per-tool). Used to render
+    // Read/Bash/Agent/WebSearch results from the structured value instead of the model-facing raw
+    // text (which carries <system-reminder> blocks, abort/truncation suffixes, and the Agent/Task
+    // agentId+usage trailer).
+    toolUseResult?: unknown;
   },
 ): SessionNotification[] {
   const taskState = options?.taskState ?? new Map();
@@ -4051,6 +4066,17 @@ export function toAcpNotifications(
 
     return [{ sessionId, update }];
   }
+
+  // Story 079 (R3/R4): `toolUseResult` is message-level and carries no tool_use_id of its own — it
+  // describes "the" tool_result block of the message it rode in on. If several tool_result blocks
+  // were ever batched into one message it couldn't be attributed, so it is only honored when the
+  // message carries exactly one.
+  const toolUseResult =
+    options?.toolUseResult !== undefined &&
+    content.filter((c) => typeof c === "object" && c !== null && c.type === "tool_result")
+      .length === 1
+      ? options.toolUseResult
+      : undefined;
 
   const output = [];
   // Only handle the first chunk for streaming; extend as needed for batching
@@ -4253,6 +4279,7 @@ export function toAcpNotifications(
             chunk,
             toolUseCache[chunk.tool_use_id],
             supportsTerminalOutput,
+            toolUseResult,
           );
 
           // When terminal output is supported, send terminal_output as a
