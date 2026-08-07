@@ -39,6 +39,16 @@ if (process.argv.includes("--cli")) {
     console.error(err);
     process.exit(1);
   });
+} else if (process.argv.includes("--version")) {
+  // Story 080 (R3.1–R3.3) — the `--version` flag ported from upstream #813. Matched AFTER `--cli` on
+  // purpose: `--cli` is a passthrough to the real binary, so `--cli --version` must report CLAUDE's
+  // version, not ours. R3.2 — this branch prints and exits 0 before the ACP bootstrap below is ever
+  // reached, so no session is opened, no PTY is spawned and no turn is started. The payload module is
+  // imported dynamically so it stays off the hot path of the other two branches. It writes to stdout
+  // directly and NOT via console.log, which the branch below rewires to stderr for the ACP protocol.
+  const { collectVersionInfo, formatVersionInfo } = await import("./version-info.js");
+  process.stdout.write(`${formatVersionInfo(collectVersionInfo())}\n`);
+  process.exit(0);
 } else {
   // Apply env vars from the managed-policy tier before any SDK call so the
   // SDK subprocess inherits them. Going through resolveSettings (vs. a raw

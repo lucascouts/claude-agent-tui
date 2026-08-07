@@ -5,6 +5,12 @@
   "tag": "v0.57.0",
   "sha": "2bf865eb42bbe744c476d38a005444eab8f4b624",
   "tagShaVerified": true,
+  "versionRecords": {
+    "note": "Each tree carries three version records that answer three different questions; they are not expected to be equal. This block is the normative statement of what each one governs. Prose home: docs/FORK.md. Machine-checked by test/version-records.test.ts.",
+    "packageJsonVersion": "The npm identity of THIS tree. In the fork tree it is INERT - the fork is never published, and fork/.github/workflows/ is a documentary copy of the upstream identity that has never run. In the mirror tree it is the published version and is owned by release-please; never edit it by hand.",
+    "releasePleaseManifest": "release-please's release state for THIS tree. In the fork tree it is an UPSTREAM-TRACKING record: it MUST equal forkProvenanceTag without the leading 'v', and CHANGELOG.md's newest entry MUST carry that same version. In the mirror tree it is LIVE and MUST equal packageJsonVersion.",
+    "forkProvenanceTag": "The upstream tag currently vendored into src/ - the single live anchor for the fork point, re-anchored by sync stories (009 -> v0.39.0, 070 -> v0.53.0, 074 -> v0.57.0). It is independent of packageJsonVersion in both trees."
+  },
   "upstreamDependencyKeys": ["@agentclientprotocol/sdk", "@anthropic-ai/claude-agent-sdk", "zod"],
   "externalRuntimeDeps": [
     {
