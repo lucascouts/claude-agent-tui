@@ -60,7 +60,7 @@
   "author": "lucascouts",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.3.0",

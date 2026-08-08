@@ -25,7 +25,11 @@ This project bridges the two: it drives the **official Claude Code TUI** over a 
 ## Requirements
 
 - The **`claude` CLI** (Claude Code subscription) available on your `PATH`.
-- **Node.js ≥ 23** — the runtime and test suite use native TypeScript type-stripping.
+- **Node.js ≥ 24** — the runtime and test suite use native TypeScript type-stripping (`node --experimental-strip-types`). Raising this floor from the previous `>=20` is a **breaking change** for consumers still on Node 20–23.
+
+> **Why 24, and not upstream's `>=22`?** The floor is a support policy, not a measured minimum: this project targets the **active LTS** line, which is Node 24. It is verified rather than copied — a fresh clone with no host `node_modules` or `dist/`, then `npm ci` → `npm run build` → `npm test`, inside `node:24` pinned by digest `sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584` (Node v24.19.0). Green in both the fork and mirror trees: 1222 tests in the fork, 1183 here, 0 failures.
+>
+> A bare `>=22` cannot keep its own promise: `--experimental-strip-types` only landed in Node 22.6, so `>=22` still admits 22.0–22.5, where `npm install` succeeds and `npm test` cannot start. Any floor of 23 or higher closes that gap.
 
 ## Register in Zed
 
