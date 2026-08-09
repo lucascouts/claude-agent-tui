@@ -110,3 +110,29 @@ test("engine floor: the floor actually admits the test runner's flag (R1.1)", ()
     "a floor of 22 admits 22.0-22.5, which lack --experimental-strip-types — npm install would succeed where npm test cannot run",
   );
 });
+
+test("engine floor: the lockfile's root engines equals the manifest's (R1.6)", (t) => {
+  // Read the root entry through the empty-string key of `packages`, and nothing
+  // else. Every other entry is a dependency, and well over a hundred of them
+  // declare an `engines` of their own — @hono/node-server's says >=20 in both
+  // trees — so a grep, or any lookup that takes the first `engines` in the file,
+  // can report a dependency's floor as if it were ours. That is exactly how the
+  // audit misread this leg and waved it through by hand.
+  //
+  // The drift is not hypothetical: both lockfiles said >=20 while both manifests
+  // said >=24, and they only came back into line as a side effect of a dependency
+  // bump's `npm install`. Nothing caught it. This assertion is the gate that was
+  // missing — the lockfile is what `npm ci` enforces, so a stale copy here promises
+  // installers a Node version the project does not support.
+  const lockPath = join(treeRoot, "package-lock.json");
+  if (!existsSync(lockPath)) {
+    return t.skip("no package-lock.json in this tree — the published package ships without one");
+  }
+  const lockRoot = readJson(lockPath).packages?.[""];
+  assert.ok(lockRoot, `package-lock.json must carry its root entry under packages[""]`);
+  assert.deepEqual(
+    lockRoot.engines,
+    readJson(join(treeRoot, "package.json")).engines,
+    "the lockfile's root engines is a copy of the manifest's — when they disagree, the copy is stale",
+  );
+});
