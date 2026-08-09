@@ -12,7 +12,6 @@ This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://gith
 
 ### Infrastructure
 
-* drop Scorecard's push trigger, it races the CI it measures ([652bfcc](https://github.com/lucascouts/claude-agent-tui/commit/652bfcc4cba1919e33efddef5ffd55b627903556))
 * drop Scorecard's push trigger, it races the CI it measures ([aede516](https://github.com/lucascouts/claude-agent-tui/commit/aede5164a1c30f4fe9ba0826fbf5947ec7c988ba))
 
 ## [0.10.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.9.0...v0.10.0) (2026-08-09)
