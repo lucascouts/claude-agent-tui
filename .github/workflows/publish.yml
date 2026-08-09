@@ -27,7 +27,11 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
-          release-type: node
+          # NO release-type here. In v5's loadOrBuildManifest(), a non-empty
+          # release-type takes the Manifest.fromConfig() branch, which builds the
+          # config in memory and NEVER opens config-file — silently discarding
+          # bump-minor-pre-major and changelog-sections. Only the empty-release-type
+          # path reaches Manifest.fromManifest(), which reads the two files below.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
