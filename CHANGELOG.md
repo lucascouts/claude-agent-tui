@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.10.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.9.0...v0.10.0) (2026-08-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* engines.node moves from >=20 to >=24. Installs on Node 20, 22 and 23 are no longer supported.
+
+### Added
+
+* add a --version flag reporting package, fork point and claude versions ([ab2dfe4](https://github.com/lucascouts/claude-agent-tui/commit/ab2dfe4c6eb98f13594aabd58d80f08a7f7abce5))
+* require Node &gt;=24 (active LTS) ([a2fcbcc](https://github.com/lucascouts/claude-agent-tui/commit/a2fcbcca6553ecc9d5039ede21e003fcd3bd3778))
+
+
+### Infrastructure
+
+* **deps-dev:** bump @types/node to 26.1.2 and acorn to 8.18.0 ([d5b25fb](https://github.com/lucascouts/claude-agent-tui/commit/d5b25fb3d69d7f89e3a1a7fca0a7db73683c0d86))
+* **deps:** Bump github/codeql-action/upload-sarif ([96480c4](https://github.com/lucascouts/claude-agent-tui/commit/96480c4dfc4ba6589fe1fb97fe2a2370214c3140))
+* **deps:** Bump github/codeql-action/upload-sarif from 4.37.3 to 4.37.4 ([9ccb06b](https://github.com/lucascouts/claude-agent-tui/commit/9ccb06b1caf11a69cc99a068cff7e6fdcbb2fd09))
+* let release-please actually read release-please-config.json ([17752f7](https://github.com/lucascouts/claude-agent-tui/commit/17752f74081e5f79fde3ea021df32763b6949d8e))
+* pin release-please tags to v&lt;version&gt;, not &lt;component&gt;-v&lt;version&gt; ([6d7b30e](https://github.com/lucascouts/claude-agent-tui/commit/6d7b30ecee16499d54244699988735670ccbbd29))
+
 ## [0.9.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.8.0...v0.9.0) (2026-08-06)
 
 
