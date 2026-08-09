@@ -11,8 +11,13 @@ on:
   schedule:
     # Weekly, Monday 04:27 UTC (offset to avoid the top-of-hour runner rush).
     - cron: "27 4 * * 1"
-  push:
-    branches: [main]
+  # No `push:` trigger, deliberately. Scorecard's SAST and CI-Tests checks score the
+  # ratio of recent commits/PRs that carry a successful CodeQL or CI check run. Fired
+  # on push, it races the very CI it measures: on 7d0422b it concluded at 01:24:25Z
+  # while `Build` only finished at 01:27:32Z, so the two newest commits and their PR
+  # were counted as unchecked (SAST 19/21, CI-Tests 12/13 -- alerts #8 and #15). The
+  # same commit scores 10/10 once those checks settle. Schedule and dispatch only, so
+  # the analysis always reads a settled history.
   workflow_dispatch:
 
 permissions: read-all
