@@ -12,7 +12,6 @@ This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://gith
 
 ### Fixed
 
-* report the live model on a resumed session ([5c4959b](https://github.com/lucascouts/claude-agent-tui/commit/5c4959bc81c47e3dc27ed6ef334f067d7ee96e0f))
 * report the live model on a resumed session ([8ad9cea](https://github.com/lucascouts/claude-agent-tui/commit/8ad9ceac33ac791711032c3bdd4c376f530706f8))
 
 ## [0.10.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.0...v0.10.1) (2026-08-09)
