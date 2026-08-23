@@ -1725,6 +1725,18 @@ export class ClaudeAcpAgent implements Agent {
    * authenticate() (R4); active sessions are untouched (R6).
    */
   async logout(_params: LogoutRequest): Promise<LogoutResponse | void> {
+    // Story 062 live-proof seam. The unit suite calls this method DIRECTLY and can only
+    // SIMULATE the SDK bind (acp.js:999), so it cannot prove the real client reaches the
+    // handler over the wire — the one risk Task 2.1 recorded ("the name must be exactly
+    // `logout` for SDK dispatch"). This opt-in probe makes that dispatch observable: run
+    // the agent with FORK_AUTH_PROBE=1 and the line below appears iff the client actually
+    // called it. OFF by default, so production and the hermetic suite stay silent.
+    //
+    // stderr, never stdout — stdout is the ACP wire (same rule as agent-catalog.ts). The
+    // payload is NEVER logged: `_params` may carry gateway credentials.
+    if (process.env.FORK_AUTH_PROBE === "1") {
+      process.stderr.write("[auth-probe] logout dispatched by the client\n");
+    }
     this.gatewayAuthRequest = undefined;
   }
 
