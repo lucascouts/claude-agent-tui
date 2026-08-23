@@ -122,6 +122,7 @@ import {
   MODEL_ID_CONTEXT_WINDOWS,
   modelSelectorDescription,
   DEFAULT_MODEL_INFO,
+  resolveCatalogValueFromModelId,
   isFastModeCapableModel,
   classifyFastModeSignal,
   FAST_MODE_CONFIG_ID,
@@ -2789,6 +2790,58 @@ export class ClaudeAcpAgent implements Agent {
         }
       }
     }
+
+    // Story 081 (R1.1) — reseed the model selector from the turn's REAL model, so a RESUMED session
+    // stops advertising `Default` when its transcript ran on another alias. Reads the SAME JSONL
+    // `model` story 069 reads three lines up (R3.1 — no new seam); kept OUTSIDE the usage block on
+    // purpose, since the selector has nothing to do with whether usage_update is latched off.
+    if (session) {
+      const modelCarrier = (turn.message as { message?: unknown }).message ?? {};
+      await this.reconcileModelSelector(
+        sessionId,
+        session,
+        (modelCarrier as { model?: unknown }).model,
+      );
+    }
+  }
+
+  /**
+   * Story 081 — align the `model` configOption with the model a turn ACTUALLY ran on.
+   *
+   * Same compare-then-rebuild-then-emit-only-on-change shape as {@link refreshFastMode}: an
+   * unresolvable id leaves the current seed alone (R2.1), and an id denoting the model already
+   * selected emits NOTHING (R1.3). That silence matters — this runs on the LIVE pump as well as the
+   * `session/load` replay, so an unguarded version would emit a config_option_update every turn.
+   *
+   * `default` and `opus` are the SAME model (`model-catalog.ts` — "`default` resolves to the
+   * recommended Opus"), so they compare EQUAL here: a `default` seed facing a `claude-opus-*`
+   * transcript is already correct, and rewriting it to `opus` would change the visible label without
+   * any model having changed.
+   */
+  private async reconcileModelSelector(
+    sessionId: string,
+    session: Session,
+    rawModel: unknown,
+  ): Promise<void> {
+    if (typeof rawModel !== "string" || rawModel.length === 0) return;
+    const resolved = resolveCatalogValueFromModelId(rawModel);
+    if (resolved === null) return; // unknown family → keep the existing seed (R2.1)
+
+    const modelOpt = session.configOptions.find((o) => o.id === "model");
+    const current = typeof modelOpt?.currentValue === "string" ? modelOpt.currentValue : undefined;
+    if (current === undefined) return;
+
+    // `default` is an ALIAS for opus — normalise before comparing so the two never fight (R1.3).
+    const family = (v: string): string => (v === "default" ? "opus" : v);
+    if (family(current) === family(resolved)) return; // same model → nothing visible changed
+
+    session.configOptions = this.rebuildConfigOptionsPreserving(session, resolved);
+    // The session may have been torn down mid-await — same guard refreshFastMode uses.
+    if (!this.sessions[sessionId]) return;
+    await this.client.sessionUpdate({
+      sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: session.configOptions },
+    });
   }
 
   /**
