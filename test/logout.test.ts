@@ -143,3 +143,105 @@ test("logout performs no credential filesystem I/O (R2)", async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// --- Story 062 live-proof seam (FORK_AUTH_PROBE) -------------------------------------
+//
+// The tests above can only SIMULATE the SDK bind, so none of them prove that a real
+// client reaches the handler over the wire. The probe below is what makes that
+// observable during the manual Zed proof; these cases pin its contract: OFF by default,
+// stderr-only, and never echoing the payload (gateway credentials).
+
+async function captureStderrAsync(fn) {
+  const saved = process.stderr.write;
+  const chunks = [];
+  process.stderr.write = (chunk) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = saved;
+  }
+  return chunks.join("");
+}
+
+async function withProbeEnv(value, fn) {
+  const saved = process.env.FORK_AUTH_PROBE;
+  if (value === undefined) {
+    delete process.env.FORK_AUTH_PROBE;
+  } else {
+    process.env.FORK_AUTH_PROBE = value;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (saved === undefined) {
+      delete process.env.FORK_AUTH_PROBE;
+    } else {
+      process.env.FORK_AUTH_PROBE = saved;
+    }
+  }
+}
+
+test("logout probe is silent when FORK_AUTH_PROBE is unset (default OFF)", async () => {
+  const out = await withProbeEnv(undefined, () =>
+    captureStderrAsync(async () => {
+      await freshAgent().logout({});
+    }),
+  );
+  assert.equal(out, "", "the probe must stay off unless explicitly opted in");
+});
+
+test("logout probe is silent when FORK_AUTH_PROBE is not exactly \"1\"", async () => {
+  const out = await withProbeEnv("0", () =>
+    captureStderrAsync(async () => {
+      await freshAgent().logout({});
+    }),
+  );
+  assert.equal(out, "", "only the exact value \"1\" enables the probe");
+});
+
+test("logout probe emits one tagged stderr line when FORK_AUTH_PROBE=1", async () => {
+  const out = await withProbeEnv("1", () =>
+    captureStderrAsync(async () => {
+      await freshAgent().logout({});
+    }),
+  );
+  assert.match(
+    out,
+    /^\[auth-probe] logout dispatched by the client\n$/,
+    "the live proof reads this exact line to confirm wire dispatch",
+  );
+});
+
+test("logout probe never echoes the payload (credential safety)", async () => {
+  const secret = "gw-token-do-not-log";
+  const out = await withProbeEnv("1", () =>
+    captureStderrAsync(async () => {
+      await freshAgent().logout({ methodId: "gateway", token: secret });
+    }),
+  );
+  assert.ok(
+    !out.includes(secret),
+    "_params may carry gateway credentials — the probe must never log it",
+  );
+});
+
+test("logout probe does not change the handler's contract (R1, R4)", async () => {
+  await withProbeEnv("1", async () => {
+    const agent = freshAgent();
+    agent.gatewayAuthRequest = { methodId: "gateway" };
+    const out = await captureStderrAsync(async () => {
+      const result = await agent.logout({});
+      assert.ok(result === undefined || (typeof result === "object" && result !== null));
+      await agent.logout({}); // still idempotent with the probe on
+    });
+    assert.equal(agent.gatewayAuthRequest, undefined, "clearing still happens with the probe on");
+    assert.equal(
+      out.match(/\[auth-probe]/g).length,
+      2,
+      "one line per dispatch — the proof counts calls",
+    );
+  });
+});
