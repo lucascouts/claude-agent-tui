@@ -75,7 +75,7 @@ jobs:
         # Warn-first: continue-on-error keeps the pipeline green — enforcement is a
         # later, explicit decision (story 051 R1.2/R7.2). Plain action step, NOT the
         # reusable workflow (which forces SARIF upload + cannot be made non-blocking).
-        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        uses: google/osv-scanner-action/osv-scanner-action@8deb546fdb875b9996d27d4950be7312dac076a1 # v2.5.0
         continue-on-error: true
         with:
           scan-args: |-
