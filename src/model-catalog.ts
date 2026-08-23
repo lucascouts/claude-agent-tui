@@ -146,6 +146,33 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
 };
 
 /**
+ * Story 081 (R1.2) — map a turn's REAL model id (the JSONL `model`) onto a catalog `value`, so a
+ * RESUMED session can seed its model selector from the transcript instead of the static `default`.
+ *
+ * Deliberately the same shape as {@link inferContextWindowFromModelId}: match by FAMILY (not exact
+ * id) so dated snapshots (`claude-sonnet-4-5-20250929`) and the `[1m]` long-context suffix resolve,
+ * and return `null` for anything unplaceable. `null` is meaningful — it routes the caller to leave
+ * the existing seed untouched (R2.1), mirroring 069's `?? session.contextWindowSize`.
+ *
+ * TOTAL FUNCTION: never throws, whatever it is handed. Every returned string is a `value` present in
+ * {@link MODEL_CATALOG}; returning anything else would make the selector advertise an entry the
+ * client cannot select (asserted in `test/resumed-model.test.ts`).
+ *
+ * NOTE the asymmetry with the catalog's `default` entry: `default` and `opus` denote the SAME model
+ * (see the `MODEL_CATALOG` comment at `value: "default"`), so a `claude-opus-*` id resolves to
+ * `opus` here and the CALLER is responsible for treating a `default` seed as already-correct (R1.3)
+ * — that equivalence is a UI concern, not a catalog one.
+ */
+export function resolveCatalogValueFromModelId(id: string): string | null {
+  if (typeof id !== "string" || id.length === 0) return null;
+  if (/claude-opus/.test(id)) return "opus";
+  if (/claude-fable/.test(id)) return "fable5";
+  if (/claude-sonnet/.test(id)) return "sonnet";
+  if (/claude-haiku/.test(id)) return "haiku";
+  return null;
+}
+
+/**
  * Story 072 — the version/context PREFIX the claude `/model` picker now shows before the static tagline
  * (e.g. "Opus 4.8 with 1M context · Best for everyday, complex tasks"). Keyed by catalog `value`.
  *
