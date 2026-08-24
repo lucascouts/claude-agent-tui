@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.10.3](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.2...v0.10.3) (2026-08-24)
+
+
+### Infrastructure
+
+* bring @anthropic-ai/claude-agent-sdk up to 0.3.226 ([#71](https://github.com/lucascouts/claude-agent-tui/issues/71)) ([a439bd1](https://github.com/lucascouts/claude-agent-tui/commit/a439bd17c7cdb040e6239df8efd0a3511c74ec3d))
+* **deps:** Bump github/codeql-action/upload-sarif ([#65](https://github.com/lucascouts/claude-agent-tui/issues/65)) ([8c910c0](https://github.com/lucascouts/claude-agent-tui/commit/8c910c05603f11958e6ebb7076b3dec27d7cd90d))
+* **deps:** Bump google/osv-scanner-action/osv-scanner-action ([#61](https://github.com/lucascouts/claude-agent-tui/issues/61)) ([f5e0a25](https://github.com/lucascouts/claude-agent-tui/commit/f5e0a251a5927521e7a9e991eabcedf8215a79b7))
+* **deps:** Bump the minor group across 1 directory with 19 updates ([#66](https://github.com/lucascouts/claude-agent-tui/issues/66)) ([bd0455c](https://github.com/lucascouts/claude-agent-tui/commit/bd0455c0850a0741a14647c9e59b3e5bc2f4d6ec))
+* **deps:** Bump trufflesecurity/trufflehog from 3.96.0 to 3.97.0 ([#64](https://github.com/lucascouts/claude-agent-tui/issues/64)) ([bf6854d](https://github.com/lucascouts/claude-agent-tui/commit/bf6854dc579349aca874c7d627f39983a9466ea9))
+
 ## [0.10.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.1...v0.10.2) (2026-08-23)
 
 
