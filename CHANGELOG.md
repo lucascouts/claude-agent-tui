@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.11.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.11.0...v0.11.1) (2026-08-26)
+
+
+### Fixed
+
+* **084:** replace the TaskList line regex with a linear scanner (CodeQL 16, 17) ([f959eb2](https://github.com/lucascouts/claude-agent-tui/commit/f959eb2469323b2526f1e615314e61044464d617))
+
 ## [0.11.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.3...v0.11.0) (2026-08-26)
 
 
