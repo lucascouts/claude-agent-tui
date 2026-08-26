@@ -15,8 +15,11 @@
 //      `planEntries` synthesizes `priority:"medium"` for every entry. §7/R2.1 lists
 //      `{content,priority,status}`, but `priority` is NOT sourced from the todo — the assertions
 //      below pin the runtime's "medium", they do not invent a per-item priority.
-//   2. `activeForm` is DROPPED. `planEntries` does not carry the todo's `activeForm` into the
-//      `PlanEntry`; it is noted here and NOT asserted to survive.
+//   2. `activeForm` is CARRIED for an in-progress item — changed by the #974 port (upstream
+//      v0.67.0). `planEntries` now reads `status === "in_progress" && activeForm ? activeForm :
+//      content`, so an in-progress todo renders in its active voice ("Wiring seam") and every
+//      other status still renders its imperative `content`. This note previously recorded the
+//      field as DROPPED; the assertions below pin the new rule on BOTH sides of the branch.
 //   3. `taskStateToPlanEntries` is the headless Task*/TaskCreate path (a `TaskState` mapper), NOT
 //      the TodoWrite path, and is NOT exported from `dist/lib.js` (importing it would resolve to
 //      `undefined`). The TodoWrite row uses `planEntries` ONLY — this test imports `planEntries`.
@@ -86,9 +89,11 @@ test("plan entries cover EVERY todo item: length 3, each {content,status,priorit
   assert.equal(entries.length, 3, "one plan entry per todo item (all three covered)");
 
   // Each entry maps {content,status} from the matching todo; `priority` is the HARDCODED "medium"
-  // (DRIFT 1 — not sourced from the todo) and `activeForm` is absent (DRIFT 2 — dropped).
+  // (DRIFT 1 — not sourced from the todo). The in-progress entry carries its `activeForm`
+  // ("Wiring seam") and the other two keep their `content` (DRIFT 2, post-#974) — the three
+  // deepEquals pin both sides of that branch at once.
   assert.deepEqual(entries[0], { content: "Write tests", status: "pending", priority: "medium" });
-  assert.deepEqual(entries[1], { content: "Wire seam", status: "in_progress", priority: "medium" });
+  assert.deepEqual(entries[1], { content: "Wiring seam", status: "in_progress", priority: "medium" });
   assert.deepEqual(entries[2], { content: "Commit", status: "completed", priority: "medium" });
 });
 

@@ -57,6 +57,7 @@ import {
 import { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import { BetaContentBlock, BetaRawContentBlockDelta } from "@anthropic-ai/sdk/resources/beta.mjs";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import packageJson from "../package.json" with { type: "json" };
@@ -66,6 +67,9 @@ import {
   applyTaskUpdate,
   ClaudePlanEntry,
   parseTaskCreateOutput,
+  parseTaskListOutput,
+  parseTaskUpdateOutput,
+  applyTaskList,
   planEntries,
   registerHookCallback,
   TaskState,
@@ -1057,6 +1061,12 @@ export type ToolUpdateMeta = {
     toolName: string;
     /* The structured output provided by Claude Code. */
     toolResponse?: unknown;
+    /* For Skill tool calls: the name of the skill being loaded (e.g. "commits").
+       Lets clients render a "Load skill: <name>" block without parsing the title. */
+    skill?: string;
+    /* For Skill tool calls: absolute path of that skill's SKILL.md, when it could be
+       located on disk. Lets clients turn the rendered skill name into a link to it. */
+    skillPath?: string;
   };
   /* Terminal metadata for Bash tool execution, matching codex-acp's _meta protocol. */
   terminal_info?: {
@@ -1072,6 +1082,66 @@ export type ToolUpdateMeta = {
     signal: string | null;
   };
 };
+
+/**
+ * Upstream #986 (v0.67.0) — build the `_meta.claudeCode` bag for one tool_use.
+ * Extracted from the four inline literals that used to build it so the Skill
+ * fields cannot land on some call sites and not others.
+ */
+function claudeCodeMetaFromToolUse(
+  toolUse: { name: string; input?: unknown },
+  cwd?: string,
+): NonNullable<ToolUpdateMeta["claudeCode"]> {
+  const skillName =
+    toolUse.name === "Skill"
+      ? (toolUse.input as { skill?: string } | null | undefined)?.skill
+      : undefined;
+  const skillPath = skillName ? resolveSkillPath(skillName, cwd) : undefined;
+  return {
+    toolName: toolUse.name,
+    ...(skillName ? { skill: skillName } : {}),
+    ...(skillPath ? { skillPath } : {}),
+  };
+}
+
+/** Roots a skill's directory may sit under, relative to the directory the scope resolves to. */
+const SKILL_CONTAINER_DIRS = [".claude/skills", ".agents/skills"] as const;
+
+/**
+ * Absolute path of a skill's `SKILL.md`, or `undefined` when none of the known layouts holds one.
+ *
+ * The `Skill` tool reports only the skill's name, so the file has to be located by probing the
+ * layouts skills actually use: project- and user-level `.claude/skills` (plus `.agents/skills`),
+ * and for a `<prefix>:<name>` spelling either a plugin (`.claude/plugins/<prefix>/skills/<name>`)
+ * or a directory-scoped skill (`<prefix>/.claude/skills/<name>`), which share that spelling. Only
+ * a path that exists on disk is returned, so a wrong guess costs nothing and clients never render
+ * a link to a missing file.
+ */
+function resolveSkillPath(skillName: string, cwd?: string): string | undefined {
+  if (!cwd) {
+    return undefined;
+  }
+  const colon = skillName.indexOf(":");
+  const scope = colon < 0 ? undefined : skillName.slice(0, colon);
+  const name = colon < 0 ? skillName : skillName.slice(colon + 1);
+  if (!name) {
+    return undefined;
+  }
+  const candidates: string[] = [];
+  const addCandidates = (base: string) => {
+    for (const container of SKILL_CONTAINER_DIRS) {
+      candidates.push(path.join(base, container, name, "SKILL.md"));
+    }
+  };
+  if (scope) {
+    // A `<prefix>:<name>` skill is either directory-scoped or a plugin's; both look identical.
+    addCandidates(path.join(cwd, scope));
+    candidates.push(path.join(cwd, ".claude/plugins", scope, "skills", name, "SKILL.md"));
+  }
+  addCandidates(cwd);
+  addCandidates(os.homedir());
+  return candidates.find((candidate) => existsSync(candidate));
+}
 
 export type ToolUseCache = {
   [key: string]: {
@@ -4228,8 +4298,8 @@ export function toAcpNotifications(
                   const update: SessionNotification["update"] = {
                     _meta: {
                       claudeCode: {
+                        ...claudeCodeMetaFromToolUse(toolUse, options?.cwd),
                         toolResponse,
-                        toolName: toolUse.name,
                       },
                     } satisfies ToolUpdateMeta,
                     toolCallId: toolUseId,
@@ -4262,9 +4332,7 @@ export function toAcpNotifications(
             // rather than emitting a duplicate tool_call.
             update = {
               _meta: {
-                claudeCode: {
-                  toolName: chunk.name,
-                },
+                claudeCode: claudeCodeMetaFromToolUse(chunk, options?.cwd),
               } satisfies ToolUpdateMeta,
               toolCallId: chunk.id,
               sessionUpdate: "tool_call_update",
@@ -4276,9 +4344,7 @@ export function toAcpNotifications(
             // send as tool_call with terminal_info for Bash tools.
             update = {
               _meta: {
-                claudeCode: {
-                  toolName: chunk.name,
-                },
+                claudeCode: claudeCodeMetaFromToolUse(chunk, options?.cwd),
                 ...(chunk.name === "Bash" && supportsTerminalOutput
                   ? { terminal_info: { terminal_id: chunk.id } }
                   : {}),
@@ -4318,22 +4384,50 @@ export function toAcpNotifications(
         ) {
           // Headless/SDK sessions emit Task* tools instead of TodoWrite.
           // TaskCreate / TaskUpdate mutate the accumulated task list; TaskList
-          // and TaskGet are read-only so we just suppress their tool_call /
-          // tool_result events. The plan update is emitted as a snapshot of
-          // the accumulated state, mirroring the legacy TodoWrite behavior.
+          // RECONCILES it against the SDK's authoritative snapshot (upstream #974),
+          // which is what repairs a resumed or compacted session whose creating
+          // calls are no longer in replay history. TaskGet stays read-only and
+          // suppressed. The plan update is emitted as a snapshot of the accumulated
+          // state, mirroring the legacy TodoWrite behavior.
+          //
+          // Each parser is offered the structured `toolUseResult` FIRST and the
+          // model-facing `chunk.content` second. That order is not cosmetic: the
+          // measured transcripts put the structured object only in `toolUseResult`
+          // and a short sentence in `content`, so reading `content` alone (as this
+          // arm did before) parsed nothing at all.
           const isError = "is_error" in chunk && chunk.is_error;
+          let shouldEmitTaskPlan = false;
           if (!isError) {
             if (toolUse.name === "TaskCreate") {
               applyTaskCreate(
                 taskState,
                 toolUse.input as Parameters<typeof applyTaskCreate>[1],
-                parseTaskCreateOutput(chunk.content),
+                parseTaskCreateOutput(toolUseResult) ?? parseTaskCreateOutput(chunk.content),
               );
+              shouldEmitTaskPlan = true;
             } else if (toolUse.name === "TaskUpdate") {
-              applyTaskUpdate(taskState, toolUse.input as Parameters<typeof applyTaskUpdate>[1]);
+              const input = toolUse.input as Parameters<typeof applyTaskUpdate>[1];
+              const output =
+                parseTaskUpdateOutput(toolUseResult, input?.taskId) ??
+                parseTaskUpdateOutput(chunk.content, input?.taskId);
+              // Older transcripts carry no structured output, so the input-based
+              // path is retained. When an output IS available, only a confirmed
+              // update for the same task is applied — a TaskUpdate can fail
+              // logically (unknown id) without the result being flagged is_error.
+              if (!output || (output.success && output.taskId === input?.taskId)) {
+                applyTaskUpdate(taskState, input);
+                shouldEmitTaskPlan = true;
+              }
+            } else if (toolUse.name === "TaskList") {
+              const output =
+                parseTaskListOutput(toolUseResult) ?? parseTaskListOutput(chunk.content);
+              if (output) {
+                applyTaskList(taskState, output);
+                shouldEmitTaskPlan = true;
+              }
             }
           }
-          if (!isError && (toolUse.name === "TaskCreate" || toolUse.name === "TaskUpdate")) {
+          if (shouldEmitTaskPlan) {
             update = {
               sessionUpdate: "plan",
               entries: taskStateToPlanEntries(taskState),
@@ -4370,9 +4464,7 @@ export function toAcpNotifications(
 
           update = {
             _meta: {
-              claudeCode: {
-                toolName: toolUse.name,
-              },
+              claudeCode: claudeCodeMetaFromToolUse(toolUse, options?.cwd),
               ...(toolMeta?.terminal_exit ? { terminal_exit: toolMeta.terminal_exit } : {}),
             } satisfies ToolUpdateMeta,
             toolCallId: chunk.tool_use_id,

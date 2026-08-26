@@ -17,7 +17,10 @@
 //
 // DRIFT NOTES (carry-over from Task 2 — user-confirmed: lock the REAL runtime, do NOT patch tools.ts):
 //   1. `priority` is HARDCODED "medium" by `planEntries` (NOT sourced from the todo).
-//   2. `activeForm` is DROPPED — not carried into the PlanEntry; asserted absent below.
+//   2. `activeForm` is CARRIED for an in-progress item since the #974 port (upstream v0.67.0):
+//      `status === "in_progress" && activeForm ? activeForm : content`. Asserted below on both
+//      sides of that branch — the in-progress todo renders "Implementing", the pending one
+//      keeps its `content`.
 //
 // REGRESSION GUARD over already-delivered runtime (story 011 translator + story 019 kind wiring): the
 // §7 translator is kept byte-for-byte; this story only WIRES the seam and asserts. EXPECTED to PASS on
@@ -89,16 +92,17 @@ test("plan/ExitPlanMode path renders end-to-end as a coherent stream, no throw",
   );
 });
 
-test("the `plan` is the FULL todo list: length 2, each {content,status,priority:'medium'} (activeForm dropped)", () => {
+test("the `plan` is the FULL todo list: length 2, each {content,status,priority:'medium'} (activeForm carried when in_progress)", () => {
   const notifs: any = translate(planPathEvent(), {});
   const entries = notifs[0].update.entries;
 
   // R3.2 — the full-list plan update: one entry per todo item, in order.
   assert.ok(Array.isArray(entries), "the `plan` update carries an `entries` array");
   assert.equal(entries.length, 2, "one plan entry per todo item (the full list)");
-  // {content,status} from the matching todo; `priority` is the HARDCODED "medium" (DRIFT 1) and
-  // `activeForm` is absent (DRIFT 2 — dropped). deepEqual pins both at once.
-  assert.deepEqual(entries[0], { content: "Implement", status: "in_progress", priority: "medium" });
+  // {content,status} from the matching todo; `priority` is the HARDCODED "medium" (DRIFT 1). The
+  // in-progress entry renders its `activeForm` and the pending one its `content` (DRIFT 2,
+  // post-#974) — deepEqual pins both sides of the branch at once.
+  assert.deepEqual(entries[0], { content: "Implementing", status: "in_progress", priority: "medium" });
   assert.deepEqual(entries[1], { content: "Review", status: "pending", priority: "medium" });
 
   // Direct-reuse cross-check: the emitted entries ARE the reused planEntries output (no local re-impl).

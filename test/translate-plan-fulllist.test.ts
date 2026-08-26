@@ -18,8 +18,11 @@
 // policy: lock the REAL runtime and record the drift, do NOT patch `tools.ts`:
 //   1. `priority` is HARDCODED to "medium". The input has NO `priority`; `planEntries` synthesizes
 //      `priority:"medium"` for every entry. The assertions pin the runtime's "medium".
-//   2. `activeForm` is DROPPED. `planEntries` does not carry the todo's `activeForm` into the
-//      `PlanEntry`; it is noted here and NOT asserted to survive.
+//   2. `activeForm` is CARRIED for an in-progress item — changed by the #974 port (upstream
+//      v0.67.0). `planEntries` now reads `status === "in_progress" && activeForm ? activeForm :
+//      content`, so an in-progress todo renders in its active voice ("Wiring seam") and every
+//      other status still renders its imperative `content`. This note previously recorded the
+//      field as DROPPED; the assertions below pin the new rule on BOTH sides of the branch.
 //   3. `taskStateToPlanEntries` is the headless Task*/TaskCreate path (a `TaskState` mapper), NOT
 //      the TodoWrite path, and is NOT exported from `dist/lib.js` (do not import it). The TodoWrite
 //      row uses `planEntries` ONLY — this test imports nothing from the Task* path.
@@ -111,7 +114,8 @@ test("update 2 reflects the flipped status AND retains the unchanged item (whole
   const plan2 = planFor("toolu_todoB", SNAPSHOT_2, cache);
 
   // The flipped item A carries its UPDATED status (`in_progress`), with the hardcoded "medium"
-  // priority (DRIFT 1) and no activeForm (DRIFT 2).
+  // priority (DRIFT 1). This fixture's `activeForm` equals its `content`, so the #974 rule is
+  // invisible here by construction — translate-plan.test.ts is where the branch is pinned.
   const a = plan2.entries.find((e: any) => e.content === "A");
   assert.deepEqual(
     a,

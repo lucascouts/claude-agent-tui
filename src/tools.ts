@@ -19,7 +19,9 @@ import {
   GrepInput,
   TaskCreateInput,
   TaskCreateOutput,
+  TaskListOutput,
   TaskUpdateInput,
+  TaskUpdateOutput,
   TodoWriteInput,
   WebFetchInput,
   WebSearchInput,
@@ -482,6 +484,22 @@ export function toolInfoFromToolUse(
       };
     }
 
+    // Upstream #986 (v0.67.0) — the `Skill` tool announces a skill being loaded.
+    // Without this case it falls through to `Other` and renders as a generic block
+    // titled "Skill" with the raw result text behind an expander. The skill NAME is
+    // the tool's only meaningful input, and it arrives as a real JSONL
+    // `tool_use.input.skill` (measured: 73 of 3 515 local transcripts), so this is
+    // readable from the disk-tail engine with no new source.
+    case "Skill": {
+      const input = toolUse.input as { skill?: string } | undefined;
+      const skillName = input?.skill;
+      return {
+        title: skillName ? `Load skill: ${skillName}` : "Load skill",
+        kind: "other",
+        content: [],
+      };
+    }
+
     case "Other": {
       const input = toolUse.input;
       let output;
@@ -838,6 +856,12 @@ export function toolUpdateFromToolResult(
       return {};
     }
 
+    // The result text is a bare "Launching skill: <name>" restatement of the title
+    // the tool_use already produced — suppress it, as Edit/Write suppress theirs.
+    case "Skill": {
+      return {};
+    }
+
     case "Edit": // Edit is handled in hooks
     case "Write": {
       return {};
@@ -1038,7 +1062,11 @@ export type ClaudePlanEntry = {
 
 export function planEntries(input: { todos: ClaudePlanEntry[] } | undefined): PlanEntry[] {
   return (input?.todos ?? []).map((todo) => ({
-    content: todo.content,
+    // Upstream #974 (v0.67.0): an in-progress item reads better in its active voice
+    // ("Fixing the bug") than in its imperative subject ("Fix the bug") — that is what
+    // `activeForm` is for. Any other status keeps the subject. Story 020's drift note
+    // recorded this field as DROPPED; it is now carried, and that note is updated.
+    content: todo.status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content,
     status: todo.status,
     priority: "medium",
   }));
@@ -1060,40 +1088,160 @@ export type TaskEntry = {
 export type TaskState = Map<string, TaskEntry>;
 
 /**
- * Best-effort parse of a TaskCreate tool_result content into the structured
- * TaskCreateOutput. The SDK delivers tool outputs either as a string or as
- * an array of TextBlockParam-like blocks containing JSON text; try both.
+ * Every text payload a tool_result can carry, in the order it should be tried: a bare string, or
+ * the `text` of each TextBlockParam-like block. Shared by the three Task* parsers so they cannot
+ * disagree about where a tool's output lives.
+ */
+function toolOutputTexts(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block) =>
+    block &&
+    typeof block === "object" &&
+    "type" in block &&
+    block.type === "text" &&
+    typeof (block as { text?: unknown }).text === "string"
+      ? [(block as { text: string }).text]
+      : [],
+  );
+}
+
+/**
+ * The already-structured object (the JSONL `toolUseResult`), or the first text payload that parses
+ * as JSON and satisfies `isValid`. Returns `undefined` when neither holds — never a partial object,
+ * so every caller can treat a result as fully shaped.
+ */
+function parseJsonToolOutput<T>(
+  content: unknown,
+  isValid: (parsed: unknown) => boolean,
+): T | undefined {
+  if (content && typeof content === "object" && !Array.isArray(content) && isValid(content)) {
+    return content as T;
+  }
+  for (const text of toolOutputTexts(content)) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (isValid(parsed)) return parsed as T;
+    } catch {
+      // Not JSON — fall through to the caller's textual fallback.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort parse of a TaskCreate result. Upstream #974 (v0.67.0).
+ *
+ * MEASURED at port time, and the reason the textual fallback is not optional here: across 186
+ * Task* tool_use/tool_result pairs in the local transcripts, the model-facing `content` is ALWAYS
+ * the short sentence ("Task #1 created successfully: <subject>") and never JSON — the structured
+ * object lives in the message-level `toolUseResult`. The pre-#974 parser tried `JSON.parse` on
+ * `content` alone, so it returned `undefined` for every real TaskCreate and `applyTaskCreate`
+ * silently did nothing. On a resumed session, where the TaskCreated hook never fires, that left
+ * the plan empty.
  */
 export function parseTaskCreateOutput(content: unknown): TaskCreateOutput | undefined {
-  const tryParse = (text: string): TaskCreateOutput | undefined => {
-    try {
-      const parsed = JSON.parse(text);
-      if (
-        parsed &&
-        typeof parsed === "object" &&
-        parsed.task &&
-        typeof parsed.task.id === "string"
-      ) {
-        return parsed as TaskCreateOutput;
-      }
-    } catch {
-      // ignore
-    }
-    return undefined;
-  };
+  const structured = parseJsonToolOutput<TaskCreateOutput>(
+    content,
+    (parsed) =>
+      Boolean(parsed) &&
+      typeof parsed === "object" &&
+      "task" in (parsed as object) &&
+      typeof (parsed as TaskCreateOutput).task?.id === "string",
+  );
+  if (structured) return structured;
 
-  if (typeof content === "string") {
-    return tryParse(content);
+  for (const text of toolOutputTexts(content)) {
+    const match = /^Task #(\S+) created successfully: (.+)$/.exec(text.trim());
+    if (match) return { task: { id: match[1], subject: match[2] } } as TaskCreateOutput;
   }
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block && block.type === "text") {
-        const text = (block as { text?: unknown }).text;
-        if (typeof text === "string") {
-          const parsed = tryParse(text);
-          if (parsed) return parsed;
-        }
+  return undefined;
+}
+
+const TASK_STATUSES = new Set(["pending", "in_progress", "completed"]);
+
+/**
+ * Best-effort parse of a TaskList result — the SDK's AUTHORITATIVE snapshot of the task list.
+ * Upstream #974 (v0.67.0).
+ *
+ * Both shapes are ported, and both are measured: the structured `{ tasks: [...] }` is what the
+ * single real TaskList in the local corpus carries in `toolUseResult`, and its `content` is the
+ * `#<id> [<status>] <subject>` listing the textual arm below parses. One sample is too few to drop
+ * either arm, so neither is dropped.
+ */
+export function parseTaskListOutput(content: unknown): TaskListOutput | undefined {
+  const structured = parseJsonToolOutput<TaskListOutput>(
+    content,
+    (parsed) =>
+      Boolean(parsed) &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as TaskListOutput).tasks) &&
+      (parsed as TaskListOutput).tasks.every(
+        (task) =>
+          Boolean(task) &&
+          typeof task.id === "string" &&
+          typeof task.subject === "string" &&
+          TASK_STATUSES.has(task.status),
+      ),
+  );
+  if (structured) return structured;
+
+  for (const text of toolOutputTexts(content)) {
+    if (text.trim() === "No tasks found") return { tasks: [] };
+    const tasks: TaskListOutput["tasks"] = [];
+    let clean = true;
+    for (const line of text.trim().split("\n")) {
+      const match =
+        /^#(\S+) \[(pending|in_progress|completed)\] (.+?)(?: \(([^()]*)\))?(?: \[blocked by ((?:#[^,\]]+(?:, )?)+)\])?$/.exec(
+          line,
+        );
+      // A single unparseable line means this text is not a task listing at all — take none of it
+      // rather than a truncated plan that reads as complete.
+      if (!match) {
+        clean = false;
+        break;
       }
+      tasks.push({
+        id: match[1],
+        subject: match[3],
+        status: match[2] as TaskListOutput["tasks"][number]["status"],
+        ...(match[4] ? { owner: match[4] } : {}),
+        blockedBy: match[5] ? match[5].split(", ").map((id) => id.slice(1)) : [],
+      });
+    }
+    if (clean && tasks.length > 0) return { tasks };
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort parse of a TaskUpdate result. Upstream #974 (v0.67.0).
+ *
+ * The point is the `success` flag: a TaskUpdate can fail LOGICALLY (unknown task id) while the
+ * tool_result itself is not flagged `is_error`. Applying the requested mutation in that case
+ * writes a task the CLI does not have. `expectedTaskId` lets the textual arm attribute a
+ * "Task #<id> not found" line when the structured output is absent.
+ */
+export function parseTaskUpdateOutput(
+  content: unknown,
+  expectedTaskId?: string,
+): TaskUpdateOutput | undefined {
+  const structured = parseJsonToolOutput<TaskUpdateOutput>(
+    content,
+    (parsed) =>
+      Boolean(parsed) &&
+      typeof parsed === "object" &&
+      typeof (parsed as TaskUpdateOutput).success === "boolean" &&
+      typeof (parsed as TaskUpdateOutput).taskId === "string" &&
+      Array.isArray((parsed as TaskUpdateOutput).updatedFields),
+  );
+  if (structured) return structured;
+
+  for (const text of toolOutputTexts(content)) {
+    const notFound = /^Task #(\S+) not found$/.exec(text.trim());
+    const taskId = notFound?.[1] ?? expectedTaskId;
+    if (taskId && (notFound || text.trim() === "Failed to delete task")) {
+      return { success: false, taskId, updatedFields: [], error: text.trim() };
     }
   }
   return undefined;
@@ -1133,9 +1281,34 @@ export function applyTaskUpdate(state: TaskState, input: TaskUpdateInput | undef
   });
 }
 
+/**
+ * Reconcile the accumulated task list against the SDK's authoritative TaskList snapshot.
+ * Upstream #974 (v0.67.0).
+ *
+ * This is what repairs a RESUMED or COMPACTED session: the TaskCreate calls that built the list
+ * may be gone from replay history, so the accumulated state under-reports. The snapshot replaces
+ * the list wholesale — entries it omits were deleted and must disappear — while `activeForm` and
+ * `description` are carried over from the previous entry, because the TaskList output does not
+ * carry them and dropping them would silently degrade the plan text.
+ */
+export function applyTaskList(state: TaskState, output: TaskListOutput): void {
+  const previous = new Map(state);
+  state.clear();
+  for (const task of output.tasks) {
+    const existing = previous.get(task.id);
+    state.set(task.id, {
+      subject: task.subject,
+      status: task.status,
+      activeForm: existing?.activeForm,
+      description: existing?.description,
+    });
+  }
+}
+
 export function taskStateToPlanEntries(state: TaskState): PlanEntry[] {
   return Array.from(state.values()).map((task) => ({
-    content: task.subject,
+    // Same rule as `planEntries` above — the two plan sources must not drift.
+    content: task.status === "in_progress" && task.activeForm ? task.activeForm : task.subject,
     status: task.status,
     priority: "medium",
   }));
