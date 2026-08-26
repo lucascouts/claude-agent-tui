@@ -1161,6 +1161,94 @@ export function parseTaskCreateOutput(content: unknown): TaskCreateOutput | unde
 const TASK_STATUSES = new Set(["pending", "in_progress", "completed"]);
 
 /**
+ * One line of a textual TaskList listing — `#<id> [<status>] <subject>`, optionally followed by
+ * ` (<owner>)` and ` [blocked by #a, #b]` — or `undefined` when the line is not one.
+ *
+ * A LINEAR SCANNER, deliberately, and not the regex upstream uses. That regex nests a quantifier
+ * inside a quantified group (`(?:#[^,\]]+(?:, )?)+`) and CodeQL flagged it twice on this repo:
+ * `js/redos` (exponential) and `js/polynomial-redos`. It reproduces — on `#! [pending] a [blocked
+ * by #` followed by N repetitions of `+#`, the match time QUADRUPLES for every 2 characters added
+ * (n=20 → 4.9 ms, n=22 → 20 ms, n=24 → 79 ms), so a ~100-character line hangs the process for
+ * hours. The input is the model-facing text of a tool_result read from the transcript, so it is
+ * not trusted the way a literal in this file would be.
+ *
+ * This follows the precedent story 051 set for the command-marker stripper: replace the regex with
+ * a scanner that makes exactly one pass and never backtracks. Same grammar, same results — the
+ * equivalence is pinned by tests — in O(n).
+ *
+ * The two optional suffixes are anchored at the END of the line, so they are peeled right-to-left
+ * with `lastIndexOf`. That reproduces the lazy `(.+?)` subject of the original: the regex, unable
+ * to put parentheses inside `[^()]*`, ends up matching the LAST parenthesised group as the owner,
+ * which is exactly what `lastIndexOf` finds.
+ */
+function parseTaskListLine(line: string): TaskListOutput["tasks"][number] | undefined {
+  if (!line.startsWith("#")) return undefined;
+  const idEnd = line.indexOf(" ");
+  // `#` alone is not an id, and `\S+` cannot be empty.
+  if (idEnd < 2) return undefined;
+  const id = line.slice(1, idEnd);
+
+  const afterId = line.slice(idEnd + 1);
+  if (!afterId.startsWith("[")) return undefined;
+  const statusEnd = afterId.indexOf("]");
+  if (statusEnd < 0) return undefined;
+  const status = afterId.slice(1, statusEnd);
+  if (!TASK_STATUSES.has(status)) return undefined;
+
+  let tail = afterId.slice(statusEnd + 1);
+  if (!tail.startsWith(" ")) return undefined;
+  tail = tail.slice(1);
+
+  let blockedBy: string[] = [];
+  const BLOCKED_BY = " [blocked by ";
+  if (tail.endsWith("]")) {
+    const at = tail.lastIndexOf(BLOCKED_BY);
+    // `at > 0` also enforces the original's non-empty subject: at 0 there is nothing before it.
+    if (at > 0) {
+      const entries = tail.slice(at + BLOCKED_BY.length, -1).split(", ");
+      // Every entry is `#<id>` with an id that carries no comma and no bracket — the character
+      // class the original spelled as `[^,\]]+`.
+      if (
+        entries.length > 0 &&
+        entries.every(
+          (entry) =>
+            entry.startsWith("#") &&
+            entry.length > 1 &&
+            !entry.includes(",") &&
+            !entry.includes("]"),
+        )
+      ) {
+        blockedBy = entries.map((entry) => entry.slice(1));
+        tail = tail.slice(0, at);
+      }
+    }
+  }
+
+  let owner: string | undefined;
+  if (tail.endsWith(")")) {
+    const at = tail.lastIndexOf(" (");
+    if (at > 0) {
+      const inner = tail.slice(at + 2, -1);
+      // `[^()]*` — the owner group cannot itself contain parentheses.
+      if (!inner.includes("(") && !inner.includes(")")) {
+        owner = inner;
+        tail = tail.slice(0, at);
+      }
+    }
+  }
+
+  // `(.+?)` needs at least one character of subject.
+  if (tail.length === 0) return undefined;
+  return {
+    id,
+    subject: tail,
+    status: status as TaskListOutput["tasks"][number]["status"],
+    ...(owner ? { owner } : {}),
+    blockedBy,
+  };
+}
+
+/**
  * Best-effort parse of a TaskList result — the SDK's AUTHORITATIVE snapshot of the task list.
  * Upstream #974 (v0.67.0).
  *
@@ -1191,23 +1279,14 @@ export function parseTaskListOutput(content: unknown): TaskListOutput | undefine
     const tasks: TaskListOutput["tasks"] = [];
     let clean = true;
     for (const line of text.trim().split("\n")) {
-      const match =
-        /^#(\S+) \[(pending|in_progress|completed)\] (.+?)(?: \(([^()]*)\))?(?: \[blocked by ((?:#[^,\]]+(?:, )?)+)\])?$/.exec(
-          line,
-        );
+      const task = parseTaskListLine(line);
       // A single unparseable line means this text is not a task listing at all — take none of it
       // rather than a truncated plan that reads as complete.
-      if (!match) {
+      if (!task) {
         clean = false;
         break;
       }
-      tasks.push({
-        id: match[1],
-        subject: match[3],
-        status: match[2] as TaskListOutput["tasks"][number]["status"],
-        ...(match[4] ? { owner: match[4] } : {}),
-        blockedBy: match[5] ? match[5].split(", ").map((id) => id.slice(1)) : [],
-      });
+      tasks.push(task);
     }
     if (clean && tasks.length > 0) return { tasks };
   }
