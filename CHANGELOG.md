@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.11.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.3...v0.11.0) (2026-08-26)
+
+
+### Added
+
+* **083:** port Skill tool calls and repair the Task* plan ([#986](https://github.com/lucascouts/claude-agent-tui/issues/986), [#974](https://github.com/lucascouts/claude-agent-tui/issues/974)) ([a46fadb](https://github.com/lucascouts/claude-agent-tui/commit/a46fadb58c86afbaabecd9340382ec293c6ed4b2))
+
+
+### Infrastructure
+
+* **083:** take claude-agent-sdk 0.3.232, re-converging with upstream ([3c0bc47](https://github.com/lucascouts/claude-agent-tui/commit/3c0bc4703427e289792082d7c8654eed17e04006))
+
 ## [0.10.3](https://github.com/lucascouts/claude-agent-tui/compare/v0.10.2...v0.10.3) (2026-08-24)
 
 
