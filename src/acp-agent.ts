@@ -1255,6 +1255,13 @@ export function isLocalCommandMetadata(content: unknown): boolean {
 const PERMISSION_MODE_ALIASES: Record<string, PermissionMode> = {
   auto: "auto",
   default: "default",
+  // Ported from upstream #1004 (REBASE-AND-DRIFT.md §15.5). Claude Code 2.1.200 renamed
+  // the "default" mode to "Manual" and accepts `"defaultMode": "manual"` in settings.json.
+  // This matters more here than upstream: the engine drives whatever `claude` is on PATH,
+  // which is far newer than the 2.1.159 provenance pin, so a settings file written by the
+  // current CLI can already say "manual". Without this row it resolved to "default" via
+  // the unknown-value branch — same outcome, but with a spurious error logged every load.
+  manual: "default",
   acceptedits: "acceptEdits",
   dontask: "dontAsk",
   plan: "plan",
@@ -3722,12 +3729,23 @@ export class ClaudeAcpAgent implements Agent {
 function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState["availableModes"] {
   const modes: SessionModeState["availableModes"] = [];
 
+  // `_meta.kind` is ported from upstream #1025 (REBASE-AND-DRIFT.md §15.5): a coarse
+  // classification a client can style or group by, alongside the free-text description.
+  // Only the CATALOGUE ports — upstream applies the mode through `query.setPermissionMode`,
+  // which is CUT here (SEAM-MAP); this engine keeps its own story-032 gate path.
+  //
+  // Names and descriptions are deliberately NOT taken from upstream. Upstream renamed
+  // "Default" to "Manual" in the same commit; adopting that here would change the label
+  // Zed already shows without changing behaviour, and the alias row above already accepts
+  // "manual" on the way in. Wire ids are what both sides agree on.
+
   // Only advertise "auto" when the SDK reports the model supports it.
   if (modelInfo?.supportsAutoMode === true) {
     modes.push({
       id: "auto",
       name: "Auto",
       description: "Use a model classifier to approve/deny permission prompts",
+      _meta: { kind: "auto_review" },
     });
   }
 
@@ -3736,18 +3754,26 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
       id: "default",
       name: "Default",
       description: "Standard behavior, prompts for dangerous operations",
+      _meta: { kind: "standard" },
     },
     {
       id: "acceptEdits",
       name: "Accept Edits",
       description: "Auto-accept file edit operations",
+      _meta: { kind: "standard" },
     },
     {
       id: "plan",
       name: "Plan Mode",
       description: "Planning mode, no actual tool execution",
+      _meta: { kind: "plan" },
     },
     {
+      // No `_meta.kind`, matching the decision `claude-agent-fork` reached independently
+      // for the same mode: upstream's four kinds all describe a mode that ASKS or
+      // AUTO-APPROVES, and `dontAsk` DENIES instead. Claiming any of them would assert a
+      // semantic upstream has not defined. `dontAsk` is absent from upstream's catalogue
+      // entirely — it is a Claude Code mode, and omitting the key is how that shows.
       id: "dontAsk",
       name: "Don't Ask",
       description:
@@ -3760,6 +3786,7 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
       id: "bypassPermissions",
       name: "Bypass Permissions",
       description: "Bypass all permission checks. Selecting this restarts the session.",
+      _meta: { kind: "full_access" },
     });
   }
 
@@ -3792,10 +3819,15 @@ function buildConfigOptions(
       category: "mode",
       type: "select",
       currentValue: modes.currentModeId,
+      // `_meta` rides along with the mode (upstream #1025, §15.5). The config-option and
+      // `session/set_mode` surfaces describe the SAME catalogue, so a client that reads the
+      // kind from one must find it on the other; dropping it here would make the mode's
+      // classification depend on which surface Zed happened to read.
       options: modes.availableModes.map((m) => ({
         value: m.id,
         name: m.name,
         description: m.description,
+        _meta: m._meta,
       })),
     },
     {
