@@ -17,6 +17,12 @@ export type UsageUpdateNotification = Extract<SessionUpdate, { sessionUpdate: "u
 /** Defensive view of a JSONL message-event's `usage` block (§7). All fields optional. */
 export interface UsageCarrier {
   usage?: { input_tokens?: number | null; output_tokens?: number | null } | null;
+  /**
+   * The turn's model id, as the JSONL writes it on `assistant.message.model` (story 066).
+   * Read ONLY by {@link usageByModel}; {@link toUsageUpdate} ignores it — the pinned wire
+   * shape has no field for it. Optional and possibly empty, like every other field here.
+   */
+  model?: string | null;
 }
 
 export interface UsageOptions {
@@ -26,6 +32,24 @@ export interface UsageOptions {
    * (never an invented number — §1 "never fabricate counts").
    */
   contextWindowSize?: number;
+}
+
+/**
+ * The tokens ONE carrier accounts for — `input_tokens + output_tokens` — or `undefined` when it
+ * carries neither count.
+ *
+ * That `undefined` is the §1 best-effort skip, and it lives here so the module has exactly ONE
+ * definition of "there is nothing to report": {@link toUsageUpdate} turns it into an emitted
+ * nothing, {@link usageByModel} into an absent row. A genuine zero is a count, not a skip — only
+ * absence (missing or null on BOTH fields) skips, so the two can never drift on that distinction.
+ */
+function tokensUsed(message: UsageCarrier): number | undefined {
+  const input = message?.usage?.input_tokens;
+  const output = message?.usage?.output_tokens;
+  if ((input === undefined || input === null) && (output === undefined || output === null)) {
+    return undefined;
+  }
+  return (input ?? 0) + (output ?? 0);
 }
 
 /**
@@ -50,13 +74,9 @@ export function toUsageUpdate(
   message: UsageCarrier,
   options: UsageOptions = {},
 ): UsageUpdateNotification | undefined {
-  const input = message.usage?.input_tokens;
-  const output = message.usage?.output_tokens;
+  const used = tokensUsed(message);
   // best-effort: no usage tokens at all -> emit nothing, never fabricate.
-  if ((input === undefined || input === null) && (output === undefined || output === null)) {
-    return undefined;
-  }
-  const used = (input ?? 0) + (output ?? 0);
+  if (used === undefined) return undefined;
   const size = options.contextWindowSize ?? used;
   return { sessionUpdate: "usage_update", size, used };
 }
@@ -85,4 +105,81 @@ export function usageUpdatesFor(
   if (!options.usageUpdate) return []; // flag OFF (default) -> construct nothing
   const update = toUsageUpdate(message, options);
   return update ? [update] : [];
+}
+
+// ─── Task 3.1 (R5.1, R5.3) — per-model token usage, and what this port does NOT deliver ──────────
+//
+// WHAT IT DELIVERS. Upstream #1037 reports token usage PER MODEL. The dimension the mapping above
+// lacks is the model, and the JSONL already carries it: story 066's probe established that a model
+// switch surfaces as a per-turn `assistant.message.model` tag, on the very carrier `toUsageUpdate`
+// already reads. Grouping by that tag needs no new source (REBASE-AND-DRIFT.md §15.6).
+//
+// WHAT IT DOES NOT DELIVER. Stated here on purpose: the difference between a port and a claim of
+// parity is whether the code admits its own gap.
+//
+//   • NO CURRENT CLIENT RENDERS IT. Zed's `update_token_usage` is called only from `crates/agent/`
+//     — its NATIVE agent. Nothing in `crates/agent_servers/`, the path an ACP agent such as this one
+//     reaches Zed through, feeds it. The totals below are correct and have nowhere to arrive. That
+//     is the inverse of a CUT seam: reachable here, inert at the far end.
+//   • NOTHING HERE PUBLISHES OR BUMPS THE PACKAGE. This project is closed as a product
+//     (PROJECT-CLOSURE.md); adding this function releases no npm version and bumps none, so it
+//     cannot reach a client even if one later learned to render it.
+//   • NO WIRE SURFACE. `usageByModel` is deliberately NOT wired into the acp-agent pump and adds no
+//     field to the pinned `{ sessionUpdate, size, used }` shape. Inventing an unspecified field on
+//     an UNSTABLE notification is precisely the §1 "never fabricate" failure. It is a library
+//     function with tests and, by design, no caller.
+//
+// The ledger's word for this state is KNOWINGLY UNCONSUMED — ported because the data is present and
+// the grouping is verifiable, recorded as unconsumed because no reader exists. Do not read its
+// presence as parity.
+
+/**
+ * The key a turn's usage is filed under: its model id verbatim, or `null` when the turn carries no
+ * usable model tag.
+ *
+ * `null` rather than a string sentinel, and that is a correctness choice, not a style one. R5.1
+ * names only `assistant.message.model`, so the untagged bucket is a key this port INVENTS — and any
+ * string it invented could collide with a real model id. A turn tagged `"unknown"` is a model named
+ * "unknown"; a turn with no tag is a different thing entirely, and folding the two together would
+ * report two unrelated things as one row. `null` cannot collide, because no model id is `null`.
+ */
+export type UsageModelKey = string | null;
+
+/**
+ * The model key for one carrier. VERBATIM: the id is used exactly as the JSONL wrote it, with no
+ * normalisation, lower-casing, prefix match or suffix stripping. `claude-opus-4-8` and
+ * `claude-opus-4-8[1m]` are two models with two different context windows (see
+ * `inferContextWindowFromModelId`), so any rule that merged them would merge two models' spend into
+ * one row.
+ *
+ * Absent, non-string or EMPTY tags fold into the untagged bucket. The `length > 0` half matches the
+ * convention the live path already uses on this exact field (acp-agent.ts, story 069): an empty
+ * string is a missing tag, not a model whose name is "".
+ */
+function modelKeyOf(model: unknown): UsageModelKey {
+  return typeof model === "string" && model.length > 0 ? model : null;
+}
+
+/**
+ * Task 3.1 (R5.1) — group token usage per model, keyed by the JSONL's per-turn
+ * `assistant.message.model`. PURE and TOTAL, like the rest of this module: it never throws on a
+ * partial carrier and never fabricates a count.
+ *
+ * Each key's value is `input_tokens + output_tokens` summed across every turn filed under it — the
+ * same `used` arithmetic {@link toUsageUpdate} emits (R2.2), only partitioned. A carrier with no
+ * token counts at ALL contributes nothing and opens no row, matching that function's best-effort
+ * skip; a carrier reporting a genuine zero is not the same thing and does open one.
+ *
+ * See the block comment above for what this does NOT deliver (R5.3).
+ */
+export function usageByModel(messages: Iterable<UsageCarrier>): Map<UsageModelKey, number> {
+  const totals = new Map<UsageModelKey, number>();
+  for (const message of messages) {
+    const used = tokensUsed(message);
+    // best-effort: no usage tokens at all -> no row, never a fabricated zero.
+    if (used === undefined) continue;
+    const key = modelKeyOf(message?.model);
+    totals.set(key, (totals.get(key) ?? 0) + used);
+  }
+  return totals;
 }

@@ -175,6 +175,28 @@ function sanitizeTitle(text: string): string {
 }
 
 /**
+ * Task 3.2 (#984) — the ISO 8601 form of a `getSessionInfo` record's `lastModified` (epoch ms), or
+ * `undefined` when the record carries no usable one.
+ *
+ * Total by construction, and that is the whole point: `new Date(x).toISOString()` THROWS on an
+ * out-of-range value, and its only caller runs inside a catch that swallows — so an unguarded
+ * conversion would not surface a bad timestamp, it would silently drop the entire title push.
+ * Missing / NaN / out-of-range therefore degrades to "no timestamp" (ACP's `updatedAt` is optional),
+ * never to "no title".
+ *
+ * All three checks earn their place. `Number.isFinite` (unlike the global `isFinite`) does NOT
+ * coerce, so it rejects NaN, ±Infinity and anything a loosely-typed fake passes that is not a
+ * number — but it does not narrow the type, which is what the `undefined` test is for. And finite
+ * is not the same as representable: `new Date(1e20)` takes a finite input and yields Invalid Date,
+ * whose `toISOString()` is exactly the throw this function exists to prevent.
+ */
+function isoLastModified(lastModified: number | undefined): string | undefined {
+  if (lastModified === undefined || !Number.isFinite(lastModified)) return undefined;
+  const at = new Date(lastModified);
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString();
+}
+
+/**
  * Logger interface for customizing logging output
  */
 export interface Logger {
@@ -728,11 +750,16 @@ export interface AgentDeps {
    * resolves the session's `summary` from its JSONL — custom title, auto-summary, or first prompt).
    * Injected by the unit tests with an in-memory fake so the push is exercised hermetically, never
    * touching the real `~/.claude` transcript tree. Production passes nothing → the real SDK reader.
+   *
+   * Task 3.2 (#984): the push reads the record's `lastModified` as well, published as ACP
+   * `updatedAt`. OPTIONAL here even though the SDK's own `SDKSessionInfo` always sets it — an
+   * injected fake may legitimately supply a summary alone, and {@link ClaudeAcpAgent} treats a
+   * missing timestamp as "no timestamp", never as a reason to withhold the title.
    */
   getSessionInfo?: (
     sessionId: string,
     options?: { dir?: string },
-  ) => Promise<{ summary: string } | undefined>;
+  ) => Promise<{ summary: string; lastModified?: number } | undefined>;
   /**
    * Story 073 (R1) — override the fast-mode availability probe (default: {@link defaultFastModeProbe},
    * which fails closed until the live spike wires the real detector). Tests inject a fake returning
@@ -1484,11 +1511,11 @@ export class ClaudeAcpAgent implements Agent {
   /** Story 063 (R1/R1.1) — offline `available_commands` discovery seam; see {@link AgentDeps.discoverCommands}. */
   private readonly discoverCommands: (cwd: string) => AvailableCommand[];
   /** Story 056 (#812) — SDK session-metadata reader for the end-of-turn title push; see
-   *  {@link AgentDeps.getSessionInfo}. */
+   *  {@link AgentDeps.getSessionInfo}. Task 3.2 (#984) reads its `lastModified` too. */
   private readonly getSessionInfo: (
     sessionId: string,
     options?: { dir?: string },
-  ) => Promise<{ summary: string } | undefined>;
+  ) => Promise<{ summary: string; lastModified?: number } | undefined>;
   /** Story 073 (R1) — fast-mode availability probe seam; see {@link AgentDeps.fastModeProbe}. */
   private readonly fastModeProbe: FastModeProbe;
   /** Live PTY-engine registry shared with the per-session engines (story 014 cleanup map). */
@@ -1910,6 +1937,36 @@ export class ClaudeAcpAgent implements Agent {
     }
   }
 
+  // ─── Task 3.2 (R5.2, R5.3) — the session title, and what this port does NOT deliver ──────────
+  //
+  // WHAT IT DELIVERS. Upstream #984 titles a session from two sources, tried in order: first
+  // `query.generateSessionTitle`, a model-WRITTEN title asked for on the live SDK `Query`; and, when
+  // that is unavailable, `getSessionInfo(sessionId, { dir })`, which reads the session's own record
+  // off disk. Only the second one ports, because only the second one exists here — `createSession`
+  // is a CUT seam (SEAM-MAP), so there is no `Query` to ask, and disk is what this engine already
+  // reads. A record is a summary AND the moment it was written, so both travel: the sanitized
+  // summary as `title`, its `lastModified` as ACP's `updatedAt`. Dropping the timestamp would take
+  // the string from disk without the record it came from, leaving a client holding titles it has no
+  // way to order.
+  //
+  // WHAT IT DOES NOT DELIVER. Stated here on purpose: the difference between a port and a claim of
+  // parity is whether the code admits its own gap (REBASE-AND-DRIFT.md §15.7).
+  //
+  //   • `query.generateSessionTitle` IS CUT — no model ever writes a title in this adapter. What is
+  //     published is whatever the transcript already held: a `/rename`, the CLI's own auto-summary,
+  //     or the first prompt verbatim. That is upstream's FALLBACK — the degraded branch it takes
+  //     when the generator is unreachable — so a session that upstream would have titled in words
+  //     gets its raw first prompt instead.
+  //   • AND THAT DEGRADATION IS VISIBLE. Unlike the per-model usage of §15.6, this surface IS
+  //     consumed: `session_info_update` is what a client renders as the session's name. The gap
+  //     above reaches a user rather than sitting inert.
+  //   • `updatedAt` IS THE TITLE'S TIMESTAMP, NOT THE SESSION'S. ACP defines the field as "last
+  //     activity", but the push is deduped on the title, so a record whose `lastModified` moved
+  //     while its summary did not emits nothing and that newer time is never sent. What a client
+  //     receives is the mtime of the record that produced the CURRENT title. Widening the dedup to
+  //     the timestamp would match ACP's wording and re-push an identical title every turn — the
+  //     louder bug of the two; the narrower claim is the honest one.
+
   /**
    * Story 056 (#812) — push the sanitized session title to the client via `session_info_update`,
    * fired (fire-and-forget) by the story-024 end-of-turn boundary ONLY (never on cancel/watchdog,
@@ -1917,6 +1974,9 @@ export class ClaudeAcpAgent implements Agent {
    * so an unchanged title is not re-emitted, and silent when `getSessionInfo` finds no transcript /
    * the title is empty. Every error is swallowed and logged — this MUST NEVER reject the turn (it is
    * never awaited in `prompt()`), and a slow/never-resolving reader cannot delay the PromptResponse.
+   *
+   * Task 3.2 (#984): the record's `lastModified` rides along as ACP `updatedAt` whenever it is
+   * usable. See the block above for what this port does NOT deliver (R5.3).
    */
   private async emitSessionTitleUpdate(sessionId: string): Promise<void> {
     const session = this.sessions[sessionId];
@@ -1925,11 +1985,19 @@ export class ClaudeAcpAgent implements Agent {
       const info = await this.getSessionInfo(sessionId, { dir: session.cwd });
       if (!info) return; // no transcript / not found → nothing to push
       const title = sanitizeTitle(info.summary);
+      // Deduped on the TITLE alone, never on the record: two summaries that sanitize to the same
+      // string are ONE title, and a record touched without its summary changing is not a new one.
       if (!title || title === session.lastEmittedTitle) return; // dedup + never push empty
       session.lastEmittedTitle = title;
+      // #984: publish the disk record the title came from, not only the string it yielded. The key
+      // is OMITTED rather than sent as null when unknown — ACP reads a null `updatedAt` as "clear
+      // it", which would assert an absence this port has not established.
+      const updatedAt = isoLastModified(info.lastModified);
       await this.client.sessionUpdate({
         sessionId,
-        update: { sessionUpdate: "session_info_update", title },
+        update: updatedAt
+          ? { sessionUpdate: "session_info_update", title, updatedAt }
+          : { sessionUpdate: "session_info_update", title },
       });
     } catch (err) {
       // Swallow — never reject the turn (this method is never awaited from prompt()).
