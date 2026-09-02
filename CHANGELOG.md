@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.11.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.11.1...v0.11.2) (2026-09-02)
+
+
+### Infrastructure
+
+* **deps:** bump eventsource-parser from 3.1.0 to 3.1.1 ([#77](https://github.com/lucascouts/claude-agent-tui/issues/77)) ([2a385f1](https://github.com/lucascouts/claude-agent-tui/commit/2a385f13cf07143e186612aad039649d807bc783))
+* **deps:** Bump github/codeql-action/upload-sarif ([#74](https://github.com/lucascouts/claude-agent-tui/issues/74)) ([7dd21a4](https://github.com/lucascouts/claude-agent-tui/commit/7dd21a432dc92091d40237eb6e3ba8d12ae2d9da))
+* **deps:** Bump google/osv-scanner-action/osv-scanner-action ([#75](https://github.com/lucascouts/claude-agent-tui/issues/75)) ([06a430a](https://github.com/lucascouts/claude-agent-tui/commit/06a430a58f6edf4c63076302f02211475b71ae14))
+* **deps:** bump the minor group with 5 updates, and drop the case it removes ([#76](https://github.com/lucascouts/claude-agent-tui/issues/76)) ([4f86e30](https://github.com/lucascouts/claude-agent-tui/commit/4f86e304f09126a5ba9b940c6672c84ff561ceef))
+* ignore .epic here too, where the guard was missing ([#79](https://github.com/lucascouts/claude-agent-tui/issues/79)) ([5d8e78b](https://github.com/lucascouts/claude-agent-tui/commit/5d8e78bb07a6df547d3cb9cbf3d2c6e170dca095))
+
 ## [0.11.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.11.0...v0.11.1) (2026-08-26)
 
 
