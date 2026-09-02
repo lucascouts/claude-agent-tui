@@ -4487,10 +4487,15 @@ export function toAcpNotifications(
       case "compaction":
       case "compaction_delta":
       case "advisor_tool_result":
-      case "mid_conv_system":
       case "fallback":
         // `fallback`: model-routing marker (@anthropic-ai/sdk >= 0.104) — from/to
         // model hops, no renderable content. No-op like the control blocks above.
+        //
+        // `mid_conv_system` sat in this list until @anthropic-ai/sdk 0.120.0, whose
+        // changelog removes it as an "unsupported content block" — the API never
+        // emitted one. The case and the bump had to move together: the switch is
+        // exhaustive against `unreachable`, so keeping the case fails to compile on
+        // 0.120.0 (TS2678) and dropping it fails on 0.117.1 (TS2345).
         break;
 
       default:
