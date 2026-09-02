@@ -4,6 +4,10 @@ dist
 .claude/*.local.*
 CLAUDE.local.md
 
+# Epic stories + drafts (local planning artifacts — never versioned, per project rule)
+/.epic/
+**/.draft/
+
 # Private source-of-truth / backup meta-docs — must NOT ship in the public mirror
 BACKUP.md
 relatorio-do-projeto.md
