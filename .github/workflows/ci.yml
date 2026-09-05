@@ -18,7 +18,11 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 15, not 5: with a warm setup-node cache the whole job finishes in ~2-3 min, but on
+    # a cache miss `npm ci` alone takes ~5 min. That cancelled PRs #84 and #87 on
+    # 2026-09-04, one second past the limit, on green code. The ceiling is a runaway
+    # guard, not a performance budget.
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
