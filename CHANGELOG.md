@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.12.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.12.0...v0.12.1) (2026-09-05)
+
+
+### Documentation
+
+* sanitise the one path that hid behind a slash ([#92](https://github.com/lucascouts/claude-agent-tui/issues/92)) ([86536c4](https://github.com/lucascouts/claude-agent-tui/commit/86536c49f03a5ea3b42e67adf35c5d275a6edfae))
+
+
+### Infrastructure
+
+* **deps:** bump anchore/sbom-action from 0.24.0 to 0.24.2 ([#86](https://github.com/lucascouts/claude-agent-tui/issues/86)) ([58c8f61](https://github.com/lucascouts/claude-agent-tui/commit/58c8f615d1f1bc4245b70576b5d733affb7528a8))
+* **deps:** bump fast-uri from 3.1.5 to 3.1.7 ([#82](https://github.com/lucascouts/claude-agent-tui/issues/82)) ([66ac29d](https://github.com/lucascouts/claude-agent-tui/commit/66ac29de71efa5a34b92270f5487e60eeb3302af))
+* **deps:** bump github/codeql-action/upload-sarif ([#85](https://github.com/lucascouts/claude-agent-tui/issues/85)) ([5fb041a](https://github.com/lucascouts/claude-agent-tui/commit/5fb041ae313e341c9175291fcf115bea1f842ec0))
+* **deps:** bump qs from 6.15.3 to 6.16.0 ([#83](https://github.com/lucascouts/claude-agent-tui/issues/83)) ([02a7eee](https://github.com/lucascouts/claude-agent-tui/commit/02a7eeeb48718e1a457077b26f6ea7a0e834c083))
+* **deps:** bump the minor group across 1 directory with 19 updates ([#90](https://github.com/lucascouts/claude-agent-tui/issues/90)) ([4f1d93f](https://github.com/lucascouts/claude-agent-tui/commit/4f1d93f47c8c3714ac7e063c8c1e105d2a67f7d6))
+* **deps:** bump trufflesecurity/trufflehog from 3.97.0 to 3.97.1 ([#84](https://github.com/lucascouts/claude-agent-tui/issues/84)) ([90c16c2](https://github.com/lucascouts/claude-agent-tui/commit/90c16c2b87eb129654843f04ca955381c2ffaacc))
+* raise the Build timeout to 15 minutes, where a cache miss fits ([#89](https://github.com/lucascouts/claude-agent-tui/issues/89)) ([888881a](https://github.com/lucascouts/claude-agent-tui/commit/888881ab139578ffd3d4ed4d4d6b5730f81859d9))
+
 ## [0.12.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.11.1...v0.12.0) (2026-09-02)
 
 
