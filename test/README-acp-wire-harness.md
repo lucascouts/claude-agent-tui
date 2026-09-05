@@ -89,7 +89,7 @@ protection, proven by `usage-reject.test.ts`. See FORK.md verdict #3.
 To eyeball the GPUI render / inspect the real ACP traffic in Zed:
 
 1. Register the built fork in Zed `settings.json` under `agent_servers`, e.g.
-   `"agent_servers": { "claude-fork": { "command": "node", "args": ["<repo>/fork/dist/index.js"] } }`.
+   `"agent_servers": { "claude-fork": { "command": "node", "args": ["<repo>/dist/index.js"] } }`.
 2. Open the **Agent Panel** and start (or reopen) a thread with the fork.
 3. From the **Command Palette**, run **`dev: open acp logs`**.
 4. Drive one `session/load` (reopen a prior thread) and watch the captured ACP
