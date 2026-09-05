@@ -42,12 +42,13 @@ test("2.1 DEFAULT_MODEL_INFO advertises the full parity level set incl. xhigh + 
 
 // ---- catalog parity (056 v3 / R7) — order + membership mirror the original's /model picker --------
 
-test("catalog order + membership: default, fable5, opus, sonnet, haiku", () => {
-  // `fable5` (Claude 5 family, released 2026-07-01) sits right after `default`. The redundant
+test("catalog order + membership: default, fable51, fable5, opus, sonnet, haiku", () => {
+  // `fable5` (Claude 5 family, released 2026-07-01) sits right after `default`, and story 009's
+  // R5.2 put `fable51` immediately BEFORE it — newest of the family first. The redundant
   // `sonnet[1m]` alias and the fork-only `opusplan` extra were dropped (Sonnet 5 is natively 1M).
   assert.deepEqual(
     MODEL_CATALOG.map((m) => m.value),
-    ["default", "fable5", "opus", "sonnet", "haiku"],
+    ["default", "fable51", "fable5", "opus", "sonnet", "haiku"],
     "catalog order must be Default/Fable 5/Opus/Sonnet/Haiku",
   );
   const byVal = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!;
@@ -57,7 +58,7 @@ test("catalog order + membership: default, fable5, opus, sonnet, haiku", () => {
 
 test("supportsAutoMode set on default/fable5/opus/sonnet, NOT haiku", () => {
   const auto = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!.supportsAutoMode === true;
-  for (const v of ["default", "fable5", "opus", "sonnet"]) {
+  for (const v of ["default", "fable51", "fable5", "opus", "sonnet"]) {
     assert.ok(auto(v), `${v} must declare supportsAutoMode (surfaces the auto permission mode)`);
   }
   assert.ok(!auto("haiku"), "haiku must NOT declare supportsAutoMode (auto dropped — parity with the original)");

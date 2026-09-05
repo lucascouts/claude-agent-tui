@@ -70,6 +70,22 @@ export const MODEL_CATALOG: ModelInfo[] = [
     supportsAutoMode: true,
   },
   {
+    value: "fable51",
+    // Bare family name in the title, like fable5/Opus/Sonnet/Haiku; the "Fable 5.1" version lives
+    // in the MODEL_VERSION_LABELS prefix that composes the selector description.
+    displayName: "Fable",
+    // Fable 5.1 (Claude 5 family). Alias and id READ FROM THE INSTALLED BINARY, not guessed:
+    // `strings /opt/bin/claude` carries `fable51`, `claude-fable-5-1` and a
+    // VERTEX_REGION_CLAUDE_FABLE_5_1 region entry, so the CLI treats it as first class.
+    // The description is the same string the live `/model` picker shows for the top of the
+    // family — the CLI ships exactly three taglines and none is 5.1-specific, so this is
+    // verbatim rather than invented.
+    description: "Most capable for your hardest and longest-running tasks",
+    supportsEffort: true,
+    supportedEffortLevels: REASONING_EFFORT_LEVELS,
+    supportsAutoMode: true,
+  },
+  {
     value: "fable5",
     // Bare family name in the title (like Opus/Sonnet/Haiku); the "Fable 5" version lives in the
     // MODEL_VERSION_LABELS prefix that composes the selector description.
@@ -120,6 +136,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   default: 1_000_000,
+  fable51: 1_000_000,
   fable5: 1_000_000,
   opus: 1_000_000,
   sonnet: 1_000_000,
@@ -137,6 +154,7 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
   "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 200_000,
+  "claude-fable-5-1": 1_000_000,
   "claude-fable-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
   "claude-sonnet-4-6": 200_000,
@@ -185,6 +203,7 @@ export function resolveCatalogValueFromModelId(id: string): string | null {
  */
 export const MODEL_VERSION_LABELS: Record<string, string> = {
   default: "Opus 4.8 with 1M context",
+  fable51: "Fable 5.1 with 1M context",
   fable5: "Fable 5 with 1M context",
   opus: "Opus 4.8 with 1M context",
   sonnet: "Sonnet 5 with 1M context",

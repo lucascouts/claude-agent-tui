@@ -12,7 +12,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MODEL_CATALOG } from "../dist/model-catalog.js";
 
-const EXPECTED_ALIASES = ["default", "fable5", "opus", "sonnet", "haiku"];
+// Story 009 R5.2 added `fable51`: the Claude 5 family's newest member LEADS `fable5`, so the
+// contract is still exact order + exact membership, with one more member.
+const EXPECTED_ALIASES = ["default", "fable51", "fable5", "opus", "sonnet", "haiku"];
 
 test("2.1 catalog: exports more than the single static entry (R1.1 — was 1 item)", () => {
   assert.ok(Array.isArray(MODEL_CATALOG), "MODEL_CATALOG is an array of ModelInfo");
