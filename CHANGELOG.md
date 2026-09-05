@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.13.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.12.2...v0.13.0) (2026-09-05)
+
+
+### Added
+
+* **catalog:** add Fable 5.1, and port the two reachable v0.71.0 fragments ([be3bd81](https://github.com/lucascouts/claude-agent-tui/commit/be3bd8150d0ed5bb033826765ca598abb00d1675))
+
 ## [0.12.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.12.1...v0.12.2) (2026-09-05)
 
 
