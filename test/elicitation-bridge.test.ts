@@ -56,14 +56,14 @@ function twoQuestionInput(): AskUserQuestionInput {
   };
 }
 
-/** A fake ACP client whose `unstable_createElicitation` behaviour is programmable per test. */
+/** A fake ACP client whose `createElicitation` behaviour is programmable per test. */
 function fakeClient(
   impl: (params: unknown) => Promise<unknown>,
 ): ElicitationClient & { calls: unknown[] } {
   const calls: unknown[] = [];
   return {
     calls,
-    async unstable_createElicitation(params: unknown) {
+    async createElicitation(params: unknown) {
       calls.push(params);
       return impl(params) as never;
     },

@@ -5,7 +5,7 @@
 //
 // The load-bearing posture (design.md "Fail closed everywhere"): the elicitation path must yield a
 // LEGIBLE deny — never a crash, never an unhandled throw, never a hang — when
-//   (a) the ACP client's `unstable_createElicitation` is MISSING (capability advertised, method absent)
+//   (a) the ACP client's `createElicitation` is MISSING (capability advertised, method absent)
 //       or throws SYNCHRONOUSLY (the throw lands at argument-evaluation time, before the inline rejection
 //       handler attaches), and
 //   (b) a per-question `tool_input` is malformed (e.g. `{questions:[{header:"X"}]}` with no `options`),
@@ -51,18 +51,18 @@ function oneQuestionInput(): AskUserQuestionInput {
 }
 
 // =====================================================================================================
-// (1) BRIDGE — the client's `unstable_createElicitation` method is MISSING (undefined).
-// A capability may be advertised while the method is absent; the eager `client.unstable_createElicitation
+// (1) BRIDGE — the client's `createElicitation` method is MISSING (undefined).
+// A capability may be advertised while the method is absent; the eager `client.createElicitation
 // (req)` then throws a SYNCHRONOUS TypeError at argument-evaluation time, BEFORE the inline .then(ok,err)
 // rejection handler attaches. requestElicitation must NORMALIZE that to a fail-closed cancel (→ deny),
 // surface it via onWarn, and NOT re-throw.
 // =====================================================================================================
 
-test("4.1 (bridge) a MISSING unstable_createElicitation resolves fail-closed (deny), never throws (R4)", async () => {
+test("4.1 (bridge) a MISSING createElicitation resolves fail-closed (deny), never throws (R4)", async () => {
   const req = buildElicitationRequest(TOOL_USE_ID, SESSION, oneQuestionInput());
   let warned = "";
 
-  // No `unstable_createElicitation` on this client at all — the method is undefined.
+  // No `createElicitation` on this client at all — the method is undefined.
   const clientMissingMethod = {} as unknown as ElicitationClient;
 
   // Must RESOLVE (not reject): a throw escaping here would fail the test as an unhandled rejection.
@@ -80,17 +80,17 @@ test("4.1 (bridge) a MISSING unstable_createElicitation resolves fail-closed (de
 });
 
 // =====================================================================================================
-// (2) BRIDGE — `unstable_createElicitation` throws SYNCHRONOUSLY (present, but throws before returning
+// (2) BRIDGE — `createElicitation` throws SYNCHRONOUSLY (present, but throws before returning
 // a promise). Same fail-closed contract: normalized to a deny, warned, no throw.
 // =====================================================================================================
 
-test("4.1 (bridge) a SYNC-throwing unstable_createElicitation resolves fail-closed (deny), never throws (R4)", async () => {
+test("4.1 (bridge) a SYNC-throwing createElicitation resolves fail-closed (deny), never throws (R4)", async () => {
   const req = buildElicitationRequest(TOOL_USE_ID, SESSION, oneQuestionInput());
   let warned = "";
 
   const clientSyncThrows: ElicitationClient = {
     // NOT async — throws synchronously at call time (before any promise is created).
-    unstable_createElicitation(): Promise<never> {
+    createElicitation(): Promise<never> {
       throw new Error("sync boom at call time");
     },
   };
@@ -173,7 +173,7 @@ function fixturePayload(toolUseId: string, toolInput: unknown): string {
   });
 }
 
-/** A client whose `unstable_createElicitation` records calls — a malformed input must NEVER reach it. */
+/** A client whose `createElicitation` records calls — a malformed input must NEVER reach it. */
 function makeClient() {
   const elicitations: unknown[] = [];
   const client = {
@@ -182,7 +182,7 @@ function makeClient() {
       void params;
       return { outcome: { outcome: "selected", optionId: ALLOW_OPTION_ID } };
     },
-    unstable_createElicitation: async (params: unknown) => {
+    createElicitation: async (params: unknown) => {
       elicitations.push(params);
       return { action: "accept", content: { Env: "prod" } };
     },

@@ -5,7 +5,7 @@
 //
 // This is the test-after companion of task 3.1's implementation: with the capability negotiated
 // (`clientSupportsElicitationForm: true`), an AskUserQuestion call is driven through a real ACP form
-// elicitation (`client.unstable_createElicitation`) and the outcome is mapped back to a deny+reason — the
+// elicitation (`client.createElicitation`) and the outcome is mapped back to a deny+reason — the
 // tool is ALWAYS denied at the wire (a PreToolUse hook cannot synthesize a native tool_result), and the
 // user's selection (or the dismissal note) travels back to the model INSIDE the deny reason. Without the
 // capability the gate DEGRADES to the story-064 fail-closed deny-guard and NEVER calls the client.
@@ -114,7 +114,7 @@ interface RecordedElicitation {
  * A minimal ACP client stub carrying BOTH capabilities the broadened gate `client` type needs:
  *   - `requestPermission` (the story-033 relay — returns ALLOW; only reached by a NON-AskUserQuestion
  *     fall-through, which these tests never take, so it is a guard that never fires here);
- *   - `unstable_createElicitation` (the story-065 bridge) — returns the injected `elicitationResponse`
+ *   - `createElicitation` (the story-065 bridge) — returns the injected `elicitationResponse`
  *     and records each call so a test can assert whether it was raised.
  */
 function makeClient(elicitationResponse: unknown) {
@@ -126,7 +126,7 @@ function makeClient(elicitationResponse: unknown) {
       permissionCalls.push(params);
       return { outcome: { outcome: "selected", optionId: ALLOW_OPTION_ID } };
     },
-    unstable_createElicitation: async (params: any) => {
+    createElicitation: async (params: any) => {
       elicitations.push({ sessionId: params.sessionId, toolCallId: params.toolCallId, mode: params.mode });
       return elicitationResponse;
     },
@@ -231,7 +231,7 @@ for (const action of ["decline", "cancel"] as const) {
 
 // === (3) R3 — capability ABSENT (omitted): DEGRADE to the story-064 deny-guard, NEVER call the client ===
 // Without `clientSupportsElicitationForm`, the gate keeps the story-064 fail-closed deny-guard: the deny
-// reason names AskUserQuestion and cites the bridge limitation, and `unstable_createElicitation` is NEVER
+// reason names AskUserQuestion and cites the bridge limitation, and `createElicitation` is NEVER
 // called (the guard degrades WITHOUT reaching for a capability the client did not negotiate).
 
 test("(3) capability absent (omitted): AskUserQuestion DEGRADES to the story-064 deny-guard and NEVER raises an elicitation (R3)", async (t) => {
@@ -248,13 +248,13 @@ test("(3) capability absent (omitted): AskUserQuestion DEGRADES to the story-064
   assert.match(reason, /AskUserQuestion/, "R3: the degrade reason names the AskUserQuestion tool (story-064 reason)");
   assert.match(reason, /bridge/i, "R3: the degrade reason cites the bridge limitation (story-064 reason)");
   assert.doesNotMatch(reason, /prod/, "R3: the degrade path never reaches the client, so no answer leaks into the reason");
-  assert.equal(elicitations.length, 0, "R3: the capability-absent path NEVER calls unstable_createElicitation");
+  assert.equal(elicitations.length, 0, "R3: the capability-absent path NEVER calls createElicitation");
   assert.equal(permissionCalls.length, 0, "R3: nor does it raise a generic session/request_permission relay");
 });
 
 // === (R6 invariant) — this path introduces NO one-shot query()/`-p`/`stream-json` and does NOT alter the
 // spawn entrypoint. The elicitation branch runs ENTIRELY inside the loopback-hook decider over the kept
-// AgentSideConnection (unstable_createElicitation) + the pure bridge; it spawns nothing and touches no
+// AgentSideConnection (createElicitation) + the pure bridge; it spawns nothing and touches no
 // engine argv. The spawn-entrypoint invariant (single interactive `claude` PTY, no `-p`/`--print`, no
 // `--output-format stream-json`, no SDK `query()`) is owned END-TO-END by test/entrypoint-guard.test.ts
 // and test/guardrail-entrypoint.test.ts; this suite deliberately does NOT duplicate them — it only

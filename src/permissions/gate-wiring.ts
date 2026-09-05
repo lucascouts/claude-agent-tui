@@ -159,7 +159,7 @@ export const DEFAULT_ELICITATION_TIMEOUT_MS = 300_000;
 /** Options for {@link setupSessionGate}. Timing knobs are injectable for offline tests. */
 export interface SessionGateOptions {
   /** The ACP client surface. `AgentSideConnection` satisfies BOTH `requestPermission(params)`
-   *  (the story-033 relay) AND `unstable_createElicitation(params)` (the story-065 elicitation
+   *  (the story-033 relay) AND `createElicitation(params)` (the story-065 elicitation
    *  bridge), so the field carries both capabilities. */
   client: PermissionClient & ElicitationClient;
   /** Diagnostics sink for every fail-closed / stuck-prompt warning (production: logger.error). */

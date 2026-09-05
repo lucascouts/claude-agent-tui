@@ -3622,7 +3622,7 @@ export class ClaudeAcpAgent implements Agent {
         // Story 065 (R1/R3): negotiated in initialize() from clientCapabilities.elicitation.form. When
         // true the gate drives AskUserQuestion through a real ACP form elicitation; when false it keeps
         // the story-064 fail-closed deny-guard. this.client (AgentSideConnection) already satisfies the
-        // broadened client type (it has unstable_createElicitation).
+        // broadened client type (it has createElicitation).
         clientSupportsElicitationForm: this.clientSupportsElicitationForm,
         onWarn: (m) => this.logger.error(m),
       });

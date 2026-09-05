@@ -45,11 +45,11 @@ export interface AskUserQuestionInput {
 
 /**
  * The minimal ACP client surface the bridge needs — structurally satisfied by the kept
- * `AgentSideConnection` (`client.unstable_createElicitation(params)`). Injected so a unit test drives
+ * `AgentSideConnection` (`client.createElicitation(params)`). Injected so a unit test drives
  * the bridge with a fake client OFFLINE (no AgentSideConnection, no Zed).
  */
 export interface ElicitationClient {
-  unstable_createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
+  createElicitation(params: CreateElicitationRequest): Promise<CreateElicitationResponse>;
 }
 
 /**
@@ -205,7 +205,7 @@ export async function requestElicitation(
       // evaluation time (this `try` has only a `finally`, so an eager throw would re-throw out of
       // requestElicitation, violating "never throws"). Async rejections still take the same path.
       Promise.resolve()
-        .then(() => client.unstable_createElicitation(req))
+        .then(() => client.createElicitation(req))
         .then(
           (resp): { ok: true; resp: unknown } => ({ ok: true, resp }),
           (err): { ok: false; err: unknown } => ({ ok: false, err }),
