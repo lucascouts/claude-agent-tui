@@ -99,4 +99,10 @@ jobs:
       - name: Run trufflehog
         uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c # v3.97.4
         with:
+          # The SHA above pins the composite wrapper, not the scanner. The wrapper ends
+          # in `docker run "${IMAGE}:${VERSION}"` and `version` defaults to `latest`, so
+          # without this line the thing that actually scans is a mutable tag reaching CI
+          # without passing through any PR. Keep it equal to the version in the comment
+          # above; trufflehog-pin.test.ts fails when the two diverge.
+          version: "3.97.4"
           extra_args: --results=verified,unknown
