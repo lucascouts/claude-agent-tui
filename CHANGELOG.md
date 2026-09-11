@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.13.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.0...v0.13.1) (2026-09-11)
+
+
+### Infrastructure
+
+* **deps:** bump trufflesecurity/trufflehog from 3.97.1 to 3.97.4 ([#95](https://github.com/lucascouts/claude-agent-tui/issues/95)) ([58b7e24](https://github.com/lucascouts/claude-agent-tui/commit/58b7e2472de6f4574fd4cac111b0cfdd3cd5b407))
+
 ## [0.13.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.12.2...v0.13.0) (2026-09-05)
 
 
