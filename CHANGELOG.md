@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.13.3](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.2...v0.13.3) (2026-09-19)
+
+
+### Infrastructure
+
+* **deps:** bump github/codeql-action/upload-sarif ([#100](https://github.com/lucascouts/claude-agent-tui/issues/100)) ([11998ed](https://github.com/lucascouts/claude-agent-tui/commit/11998eda26fd9213fd3dcca3c9da5a53c97ff1c5))
+* **deps:** bump the minor group with 14 updates ([#101](https://github.com/lucascouts/claude-agent-tui/issues/101)) ([8bd857f](https://github.com/lucascouts/claude-agent-tui/commit/8bd857ff58563399ea693d747e1567b0697a487b))
+
 ## [0.13.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.1...v0.13.2) (2026-09-11)
 
 
