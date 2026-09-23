@@ -38,7 +38,7 @@ const LIVE = [
   row("claude-sonnet-4-6", "Sonnet 4.6"),
 ];
 
-const quiet = { error: () => {} };
+const quiet = { log: () => {} };
 
 test("live rows win, superseded generations removed", async () => {
   resetLiveModelCatalogCache();
@@ -59,15 +59,34 @@ test("titles and descriptions are passed through VERBATIM, never rewritten", asy
   assert.equal(opus.description, "");
 });
 
-test("a throwing source falls back to the static catalogue, and LOGS", async () => {
+test("a throwing source falls back to the static catalogue, and REPORTS it once", async () => {
   resetLiveModelCatalogCache();
   const logged = [];
-  const models = await resolveModelCatalog({ error: (m) => logged.push(String(m)) }, async () => {
+  const sink = { log: (m) => logged.push(String(m)) };
+  const boom = async () => {
     throw new Error("no claude on PATH");
-  });
+  };
+  const models = await resolveModelCatalog(sink, boom);
   assert.deepEqual(models, MODEL_CATALOG);
   assert.equal(logged.length, 1, "a silent fallback is how the old bugs stayed invisible");
   assert.match(logged[0], /no claude on PATH/);
+
+  // ONCE PER PROCESS, not once per session. Re-reporting an unchanging condition
+  // is noise, and it broke two unrelated suites that assert an exact log count.
+  await resolveModelCatalog(sink, boom);
+  await resolveModelCatalog(sink, boom);
+  assert.equal(logged.length, 1, "the report must not repeat while the process lives");
+});
+
+test("the fallback NEVER uses the error channel", async () => {
+  // `error` means a human must act. This path recovered on its own, and a truly
+  // unreachable CLI raises loudly from the PTY engine moments later anyway.
+  resetLiveModelCatalogCache();
+  let errors = 0;
+  await resolveModelCatalog({ log: () => {}, error: () => errors++ }, async () => {
+    throw new Error("boom");
+  });
+  assert.equal(errors, 0);
 });
 
 test("an EMPTY answer is a failure, not an empty picker", async () => {

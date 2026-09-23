@@ -47,7 +47,7 @@ export const CATALOG_TIMEOUT_MS = 20_000;
 export type SupportedModelsSource = () => Promise<ModelInfo[]>;
 
 interface CatalogLogger {
-  error: (...args: unknown[]) => void;
+  log: (...args: unknown[]) => void;
 }
 
 interface CacheEntry {
@@ -55,10 +55,13 @@ interface CacheEntry {
   at: number;
 }
 let cache: CacheEntry | null = null;
+/** Whether the fallback has already been reported in this process. See {@link resolveModelCatalog}. */
+let fallbackReported = false;
 
-/** Drop the memoised catalogue. Tests use it; nothing in production does. */
+/** Drop the memoised catalogue AND the once-per-process report latch. Tests use it; production does not. */
 export function resetLiveModelCatalogCache(): void {
   cache = null;
+  fallbackReported = false;
 }
 
 /**
@@ -167,9 +170,25 @@ export async function resolveModelCatalog(
     cache = { models: resolved, at: Date.now() };
     return resolved;
   } catch (error) {
-    logger?.error(
-      `Could not read the model catalogue from the CLI; falling back to the built-in list. ${String(error)}`,
-    );
+    // `log`, NOT `error`, and ONCE per process. Both halves are deliberate.
+    //
+    // Level: this path is degraded-but-recovered — the picker still works, from
+    // the built-in list. An unreachable CLI that actually matters surfaces
+    // LOUDLY a moment later, when `resolveClaudePath` throws out of the PTY
+    // engine; raising ERROR here would be a second alarm for a fault that
+    // already has one, or a false alarm for a fetch that merely timed out.
+    //
+    // Once: the condition does not change between sessions in a process, so
+    // re-reporting it per session is pure noise. It also stopped two unrelated
+    // suites dead — they assert an exact error count on the agent, and a
+    // per-session ERROR from here made it 2 where they expect 1. That was a real
+    // defect this caught, not a test to loosen.
+    if (!fallbackReported) {
+      fallbackReported = true;
+      logger?.log(
+        `Could not read the model catalogue from the CLI; using the built-in list for this process. ${String(error)}`,
+      );
+    }
     return MODEL_CATALOG;
   }
 }
