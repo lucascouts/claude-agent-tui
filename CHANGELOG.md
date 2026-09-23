@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.3...v0.14.0) (2026-09-23)
+
+
+### Added
+
+* **models:** read the picker from the CLI instead of curating it by hand ([711e684](https://github.com/lucascouts/claude-agent-tui/commit/711e684d60f854f93c8fbc11ec34e0b77af3f76a))
+
+
+### Fixed
+
+* **lint:** drop the MODEL_CATALOG import the live catalogue made unused ([82fa02a](https://github.com/lucascouts/claude-agent-tui/commit/82fa02afb6b85f5ed12f69ac3eecc77d8011f1f9))
+* **models:** report the catalogue fallback on `log`, once per process ([df2add8](https://github.com/lucascouts/claude-agent-tui/commit/df2add82e768a0a88d4c6874cf2e38fbd09a48f7))
+
+
+### Infrastructure
+
+* **gitignore:** ignore .epic/, once ([7a8be1f](https://github.com/lucascouts/claude-agent-tui/commit/7a8be1fb9ad0e22ae7e7636a5b164235d1679402))
+
 ## [0.13.3](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.2...v0.13.3) (2026-09-19)
 
 
