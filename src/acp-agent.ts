@@ -121,7 +121,6 @@ import { createTurnResolver } from "./end-of-turn.js";
 import type { DetectorSchedule, EndOfTurnDetector } from "./end-of-turn.js";
 import { sendPrompt } from "./engine-pty.js";
 import {
-  MODEL_CATALOG,
   MODEL_CONTEXT_WINDOWS,
   MODEL_ID_CONTEXT_WINDOWS,
   modelSelectorDescription,
