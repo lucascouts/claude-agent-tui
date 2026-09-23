@@ -19,11 +19,11 @@ import {
 
 // ---- Task 2 (R5.1) pure predicate --------------------------------------------------------------
 
-test("R5.1 isFastModeCapableModel: true for default/opus, false for fable5/sonnet/haiku", () => {
+test("R5.1 isFastModeCapableModel: true for default/opus, false for fable/sonnet/haiku", () => {
   for (const v of ["default", "opus"]) {
     assert.ok(isFastModeCapableModel(v), `${v} must be fast-mode capable (Opus)`);
   }
-  for (const v of ["fable5", "sonnet", "haiku"]) {
+  for (const v of ["fable", "sonnet", "haiku"]) {
     assert.ok(!isFastModeCapableModel(v), `${v} must NOT be fast-mode capable (not Opus)`);
   }
   assert.deepEqual([...FAST_MODE_MODELS].sort(), ["default", "opus"], "the set is exactly {default,opus}");

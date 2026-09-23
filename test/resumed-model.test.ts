@@ -17,7 +17,9 @@ const CATALOG_VALUES = new Set(MODEL_CATALOG.map((m) => m.value));
 
 test("resolves each live family to a catalog value (R1.2)", () => {
   assert.equal(resolveCatalogValueFromModelId("claude-opus-4-8"), "opus");
-  assert.equal(resolveCatalogValueFromModelId("claude-fable-5"), "fable5");
+  assert.equal(resolveCatalogValueFromModelId("claude-fable-5"), "fable");
+  assert.equal(resolveCatalogValueFromModelId("claude-fable-5-1"), "fable");
+  assert.equal(resolveCatalogValueFromModelId("claude-opus-5-5"), "opus");
   assert.equal(resolveCatalogValueFromModelId("claude-sonnet-5"), "sonnet");
   assert.equal(resolveCatalogValueFromModelId("claude-haiku-4-5"), "haiku");
 });
@@ -106,7 +108,7 @@ test("resumed transcript on another model reseeds the selector and emits ONCE (R
   const { agent, updates } = agentWithSession("default");
   await agent.emitTurnUpdates("s-1", turnWith("claude-fable-5"), {});
   const modelOpt = agent.sessions["s-1"].configOptions.find((o) => o.id === "model");
-  assert.equal(modelOpt.currentValue, "fable5", "selector must follow the transcript");
+  assert.equal(modelOpt.currentValue, "fable", "selector must follow the transcript");
   const emitted = updates.filter((u) => u.update?.sessionUpdate === "config_option_update");
   assert.equal(emitted.length, 1, "exactly one config_option_update per real change");
 });

@@ -75,23 +75,35 @@ test("068 R1.2: fully unknown → null; call site applies DEFAULT_CONTEXT_WINDOW
   assert.equal(resolve("totally-unknown-model"), 200_000);
 });
 
-test("069 R2: default/fable5/opus/sonnet seeds → 1M (all native 1M pre-first-turn)", () => {
+test("069 R2: default/fable/opus/sonnet seeds → 1M (all native 1M pre-first-turn)", () => {
   assert.equal(infer("default"), 1_000_000);
-  assert.equal(infer("fable5"), 1_000_000);
+  assert.equal(infer("fable"), 1_000_000);
   assert.equal(infer("opus"), 1_000_000);
   assert.equal(infer("sonnet"), 1_000_000);
 });
 
-test("069 R3: MODEL_CATALOG descriptions match the original /model picker verbatim", () => {
+test("069 R3: the fallback rows are SELF-CONTAINED — version plus the picker's own tagline", () => {
+  // Rows used to carry a bare tagline and get a curated version prefix bolted on at
+  // render time. They no longer do: live rows from the CLI arrive self-contained, and
+  // prefixing those produced doubled copy ("Opus 5.5 with 1M context · Opus 5.5 · …").
+  // So the fallback rows were reshaped to match, and the taglines stay VERBATIM from
+  // the picker — writing a better one would invent a claim Anthropic did not make.
   const byValue: Record<string, { displayName?: string; description?: string }> = {};
   for (const m of catalog.MODEL_CATALOG) byValue[m.value] = m;
-  assert.equal(byValue.opus.description, "Best for everyday, complex tasks");
-  assert.equal(byValue.sonnet.description, "Efficient for routine tasks");
-  assert.equal(byValue.haiku.description, "Fastest for quick answers");
-  assert.equal(byValue.fable5.displayName, "Fable");
-  assert.equal(byValue.fable5.description, "Most capable for your hardest and longest-running tasks");
+  assert.equal(byValue.opus.displayName, "Opus 5.5");
+  assert.equal(byValue.opus.description, "Opus 5.5 with 1M context · Best for everyday, complex tasks");
+  assert.equal(byValue.sonnet.description, "Sonnet 5 with 1M context · Efficient for routine tasks");
+  assert.equal(byValue.haiku.description, "Haiku 4.5 · Fastest for quick answers");
+  assert.equal(byValue.fable.displayName, "Fable 5.1");
+  assert.equal(
+    byValue.fable.description,
+    "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
+  );
   // `default` carries the Opus text (default = recommended Opus).
-  assert.equal(byValue.default.description, "Best for everyday, complex tasks");
+  assert.equal(
+    byValue.default.description,
+    "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+  );
 });
 
 test("072: modelSelectorDescription prepends the version/context label to the tagline", () => {
@@ -100,15 +112,15 @@ test("072: modelSelectorDescription prepends the version/context label to the ta
   // The `/model` picker format: "<version + context> · <static tagline>".
   assert.equal(
     catalog.modelSelectorDescription(byValue.default),
-    "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+    "Opus 5.5 with 1M context · Best for everyday, complex tasks",
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.opus),
-    "Opus 4.8 with 1M context · Best for everyday, complex tasks",
+    "Opus 5.5 with 1M context · Best for everyday, complex tasks",
   );
   assert.equal(
-    catalog.modelSelectorDescription(byValue.fable5),
-    "Fable 5 with 1M context · Most capable for your hardest and longest-running tasks",
+    catalog.modelSelectorDescription(byValue.fable),
+    "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
   );
   assert.equal(
     catalog.modelSelectorDescription(byValue.sonnet),

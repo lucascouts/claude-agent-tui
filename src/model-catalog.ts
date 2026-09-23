@@ -43,18 +43,43 @@ export const ULTRACODE_EFFORT_LEVEL = "xhigh";
 export const ULTRACODE_EFFORT_LABEL = "ultracode (xhigh + orchestration)";
 
 /**
+ * The FALLBACK model list — no longer what the picker normally shows.
+ *
+ * `live-model-catalog.ts` reads the real list from the CLI at session creation;
+ * this is what it falls back to when that read fails (no `claude` on PATH, a
+ * spawn error, a timeout). Everything below about hand-curation still applies to
+ * THESE rows, and the reason it is no longer the primary source is in that
+ * module's doc: the catalogue is backend-served and was measured changing shape
+ * twice in one day, which no hand-written list can track.
+ *
+ * Keep these rows CURRENT anyway. A fallback that nobody maintains is a fallback
+ * that ships a two-year-old model list on the day the CLI goes missing.
+ *
  * The static curated catalog advertised to the Zed Agent Panel's `model` selector. Each `value` is a
  * `claude` TUI alias accepted by `/model <alias>` (live) and `--model <alias>` (spawn). `default` is
  * first and is the safe fallback.
  *
- * ORDER + membership: `Default (recommended)`, `Fable 5`, `Opus`, `Sonnet`, `Haiku`. The original gets
- * its list from the SDK `supportedModels()` the fork cut, so we curate it statically. `fable5` (`/model
- * fable5` — the Claude 5 family's top model, released 2026-07-01) sits right after `default`. The
- * redundant `sonnet[1m]` alias was dropped: Sonnet 5 is natively 1M, so plain `sonnet` already IS the 1M
- * model. The fork-only `opusplan` extra was dropped too (three Sonnet-flavored entries + inconsistent
- * Opus thinking made it more confusing than useful).
+ * ORDER + membership: `Default (recommended)`, `Fable`, `Opus`, `Sonnet`, `Haiku` — TIER aliases only,
+ * never a version-numbered one. The original gets its list from the SDK `supportedModels()` the fork
+ * cut, so we curate it statically. The redundant `sonnet[1m]` alias was dropped: Sonnet 5 is natively
+ * 1M, so plain `sonnet` already IS the 1M model. The fork-only `opusplan` extra was dropped too (three
+ * Sonnet-flavored entries + inconsistent Opus thinking made it more confusing than useful).
  *
- * Effort-capable models (`default`/`fable5`/`opus`/`sonnet`) carry `supportsEffort` +
+ * **The CLI's alias vocabulary is a CLOSED SET, and a version-numbered alias is not in it.** Measured
+ * on claude 2.1.280: the accepted spellings are exactly
+ * `["sonnet","opus","haiku","fable","best","sonnet[1m]","opus[1m]","fable[1m]","opusplan"]` — plus any
+ * full wire id (`claude-opus-5-5`). Anything else 404s at spawn with `[claude-code:unrecognized_model]`,
+ * which is how the `fable51` and `fable5` rows this catalogue used to carry were BOTH dead: the binary
+ * contains those tokens (they are the CLI's internal id→short-name map), so reading them out of
+ * `strings` looked like confirmation and was not. **Probe an alias with a real turn before adding a
+ * row**: `claude -p ok --model <alias> --output-format json | jq '.is_error, .modelUsage'`.
+ *
+ * A tier alias always points at the newest member of its family, so these rows do NOT age out on a
+ * model launch — only the version text in the row does. Verified 2026-09-23:
+ * `opus` → `claude-opus-5-5`, `fable` → `claude-fable-5-1`, `sonnet` → `claude-sonnet-5`,
+ * `haiku` → `claude-haiku-4-5-20251001`.
+ *
+ * Effort-capable models (`default`/`fable`/`opus`/`sonnet`) carry `supportsEffort` +
  * `supportedEffortLevels`; `haiku` advertises none. `supportsAutoMode: true` on the same four surfaces
  * the `auto` permission mode (a model classifier) — the original drops `auto` on `haiku` (the SDK signal
  * `reconcileModeFromTranscript` clamps), so haiku omits it.
@@ -64,80 +89,67 @@ export const MODEL_CATALOG: ModelInfo[] = [
     value: "default",
     displayName: "Default (recommended)",
     // Story 069 (R3): `default` resolves to the recommended Opus, so it carries the Opus description.
-    description: "Best for everyday, complex tasks",
+    description: "Opus 5.5 with 1M context · Best for everyday, complex tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
   },
   {
-    value: "fable51",
-    // Bare family name in the title, like fable5/Opus/Sonnet/Haiku; the "Fable 5.1" version lives
-    // in the MODEL_VERSION_LABELS prefix that composes the selector description.
-    displayName: "Fable",
-    // Fable 5.1 (Claude 5 family). Alias and id READ FROM THE INSTALLED BINARY, not guessed:
-    // `strings /opt/bin/claude` carries `fable51`, `claude-fable-5-1` and a
-    // VERTEX_REGION_CLAUDE_FABLE_5_1 region entry, so the CLI treats it as first class.
+    value: "fable",
+    // The title carries the concrete version, matching the live CLI rows this list stands in for.
+    displayName: "Fable 5.1",
+    // The tier alias, PROBED not guessed: `--model fable` resolves to `claude-fable-5-1` on a real
+    // turn (2026-09-23). It replaces the `fable51`/`fable5` rows, which the CLI rejected outright —
+    // see the closed-set note on MODEL_CATALOG above.
     // The description is the same string the live `/model` picker shows for the top of the
     // family — the CLI ships exactly three taglines and none is 5.1-specific, so this is
     // verbatim rather than invented.
-    description: "Most capable for your hardest and longest-running tasks",
-    supportsEffort: true,
-    supportedEffortLevels: REASONING_EFFORT_LEVELS,
-    supportsAutoMode: true,
-  },
-  {
-    value: "fable5",
-    // Bare family name in the title (like Opus/Sonnet/Haiku); the "Fable 5" version lives in the
-    // MODEL_VERSION_LABELS prefix that composes the selector description.
-    displayName: "Fable",
-    // Fable 5 (Claude 5 family, released 2026-07-01) — the most advanced generally available model.
-    // Description verbatim from the live `/model` picker of the interactive `claude` CLI.
-    description: "Most capable for your hardest and longest-running tasks",
+    description:
+      "Fable 5.1 with 1M context · Most capable for your hardest and longest-running tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
   },
   {
     value: "opus",
-    displayName: "Opus",
-    description: "Best for everyday, complex tasks",
+    displayName: "Opus 5.5",
+    description: "Opus 5.5 with 1M context · Best for everyday, complex tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
   },
   {
     value: "sonnet",
-    displayName: "Sonnet",
-    description: "Efficient for routine tasks",
+    displayName: "Sonnet 5",
+    description: "Sonnet 5 with 1M context · Efficient for routine tasks",
     supportsEffort: true,
     supportedEffortLevels: REASONING_EFFORT_LEVELS,
     supportsAutoMode: true,
   },
   {
     value: "haiku",
-    displayName: "Haiku",
-    description: "Fastest for quick answers",
+    displayName: "Haiku 4.5",
+    description: "Haiku 4.5 · Fastest for quick answers",
   },
 ];
 
 /**
  * Story 068 (R1, R1.1, R2) — the REAL per-alias context window, keyed by the EXACT {@link MODEL_CATALOG}
- * `value`. These windows are NOT uniform: `default`/`fable5`/`opus`/`sonnet` are natively 1M and `haiku`
+ * `value`. These windows are NOT uniform: `default`/`fable`/`opus`/`sonnet` are natively 1M and `haiku`
  * is 200K. This map is the single source of truth that `inferContextWindowFromModel` (acp-agent.ts)
  * consults BEFORE the `\b1m\b` regex fallback — the bug it fixes is `opus` having wrongly reported 200K
  * (the regex only ever matched the literal `1m` token).
  *
  * `sonnet` seeds to 1M because plain `sonnet` now resolves to Sonnet 5, which is natively 1M (the
- * redundant `sonnet[1m]` alias was dropped). `default` is the recommended Opus (the claude TUI's `/model
- * default` resolves to `claude-opus-4-8[1m]`, a 1M model) and `fable5` is Fable 5 (1M). This is only the
+ * redundant `sonnet[1m]` alias was dropped). `default` and `opus` both resolve to Opus 5.5 and `fable`
+ * to Fable 5.1 — all three natively 1M per the CLI's baked-in catalogue. This is only the
  * PRE-FIRST-TURN seed: once a turn arrives, `inferContextWindowFromModelId` (story 069) AUTHORITATIVELY
  * refines the window from the transcript's real `model`. Keys MIRROR `MODEL_CATALOG` `value`s; the drift
  * guard lives in the test (068 anti-drift: every catalog value has an explicit entry).
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   default: 1_000_000,
-  fable51: 1_000_000,
-  fable5: 1_000_000,
+  fable: 1_000_000,
   opus: 1_000_000,
   sonnet: 1_000_000,
   haiku: 200_000,
@@ -149,8 +161,14 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
  * (the JSONL `model` field), correcting the alias seed. Opus is NOT uniform: 4.6 = 200K, 4.7+ = 1M.
  * Dated snapshots / future versions are covered by the family+version heuristic in
  * `inferContextWindowFromModelId`; this table is the exact-ID source of truth for today's gateway IDs.
+ *
+ * Windows are READ FROM THE CLI'S OWN BAKED-IN CATALOGUE (`context.window` / `native_1m` in the JSON
+ * the `claude` binary embeds), not from the picker copy: `claude-opus-5-5` and `claude-opus-5` are
+ * both `window: 1e6, native_1m: true`, which is why neither needs a `[1m]` suffix to get 1M.
  */
 export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
+  "claude-opus-5-5": 1_000_000,
+  "claude-opus-5": 1_000_000,
   "claude-opus-4-8": 1_000_000,
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 200_000,
@@ -184,48 +202,43 @@ export const MODEL_ID_CONTEXT_WINDOWS: Record<string, number> = {
 export function resolveCatalogValueFromModelId(id: string): string | null {
   if (typeof id !== "string" || id.length === 0) return null;
   if (/claude-opus/.test(id)) return "opus";
-  if (/claude-fable/.test(id)) return "fable5";
+  if (/claude-fable/.test(id)) return "fable";
   if (/claude-sonnet/.test(id)) return "sonnet";
   if (/claude-haiku/.test(id)) return "haiku";
   return null;
 }
 
 /**
- * Story 072 — the version/context PREFIX the claude `/model` picker now shows before the static tagline
- * (e.g. "Opus 4.8 with 1M context · Best for everyday, complex tasks"). Keyed by catalog `value`.
+ * The selector description, which is now simply the row's own `description`.
  *
- * CURATED + DRIFT-PRONE, exactly like MODEL_CATALOG membership: the fork holds only aliases pre-turn and
- * cannot derive the concrete version (the SDK `supportedModels()` was cut), so these MIRROR the LIVE
- * picker and MUST be re-verified on each model launch (source: the user's live `/model` output). The
- * static tagline stays on `ModelInfo.description` (069 R3 untouched); this only prepends "<version> · ".
- * Every current catalog entry carries a label; the no-label branch in {@link modelSelectorDescription}
- * stays as a total-function safeguard for any future label-less entry.
- */
-export const MODEL_VERSION_LABELS: Record<string, string> = {
-  default: "Opus 4.8 with 1M context",
-  fable51: "Fable 5.1 with 1M context",
-  fable5: "Fable 5 with 1M context",
-  opus: "Opus 4.8 with 1M context",
-  sonnet: "Sonnet 5 with 1M context",
-  haiku: "Haiku 4.5",
-};
-
-/**
- * Story 072 — compose the Zed selector description: "<version label> · <tagline>", or the bare tagline
- * when no label exists. PURE + TOTAL: never throws on a missing label or tagline.
+ * Story 072 used to compose `"<version label> · <tagline>"` from a curated
+ * MODEL_VERSION_LABELS map, because the hand-written rows carried only a bare
+ * tagline and the concrete version lived nowhere else. That map is GONE, and
+ * removing it was not cleanup — it was a correctness fix. Rows now arrive from
+ * the CLI (see `live-model-catalog.ts`) already carrying the version in both
+ * `displayName` and `description`, so prepending a curated prefix produced
+ * doubled copy ("Opus 5.5 with 1M context · Opus 5.5 · Best for everyday…") and,
+ * worse, could contradict the live row outright once the label went stale.
+ *
+ * The static {@link MODEL_CATALOG} rows were made self-contained to match, so
+ * this function needs no branch: the fallback path and the live path render the
+ * same way, which is exactly what "the picker matches the CLI" has to mean.
+ *
+ * Kept as a named function rather than inlined at the call site: it is the one
+ * place to put display policy back if a client ever needs different copy.
+ * PURE + TOTAL — never throws on a missing description.
  */
 export function modelSelectorDescription(info: ModelInfo): string {
-  const label = MODEL_VERSION_LABELS[info.value];
-  const tagline = info.description ?? "";
-  if (!label) return tagline;
-  return tagline ? `${label} · ${tagline}` : label;
+  return info.description ?? "";
 }
 
 /**
  * Story 073 (R5.1) — the catalog `value`s that support fast mode (`/fast on|off`). Fast mode "uses
- * Claude Opus with faster output (it does not downgrade to a smaller model)" and is available on Opus
- * 4.8/4.7 only; the CLI turns it off when switching to a non-Opus model. `default` resolves to the
- * recommended Opus, so both `default` and `opus` qualify; `fable5`/`sonnet`/`haiku` do NOT.
+ * Claude Opus with faster output (it does not downgrade to a smaller model)"; the CLI turns it off when
+ * switching to a model without it. The gate is a CAPABILITY, not a version range — the CLI's baked-in
+ * catalogue lists `fast_mode` on `claude-opus-5-5`, `claude-opus-5` and `claude-opus-4-8`, and on no
+ * Fable, Sonnet or Haiku row. `default` resolves to the recommended Opus, so both `default` and `opus`
+ * qualify; `fable`/`sonnet`/`haiku` do NOT.
  *
  * Kept HERE (not on {@link ModelInfo}) because `ModelInfo` is the SDK shape and cannot carry a
  * fork-only `supportsFastMode` field — the same reason the effort/auto flags that DO exist on the SDK

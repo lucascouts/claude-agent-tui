@@ -139,6 +139,7 @@ import {
   ULTRACODE_EFFORT_LEVEL,
   ULTRACODE_EFFORT_LABEL,
 } from "./model-catalog.js";
+import { resolveModelCatalog } from "./live-model-catalog.js";
 // Story 060 (R2.2/R2.3/R3.2) — the declarative spawn-time complement to the live ultracode keyword:
 // toggle the {ultracode,ultracodeKeywordTrigger} keys in the gate's per-session scratch settings file
 // (preserving the hook + every other key). Lives in the gate's settings-writer so it reuses durableWrite.
@@ -3714,6 +3715,12 @@ export class ClaudeAcpAgent implements Agent {
     // with the current model seeded to the safe `default`. Populating the catalog also unlocks the
     // effort selector via buildConfigOptions (§5/§7). The current MODE is still seeded "default" here;
     // Task 4.1 reseeds it from settings.permissions.defaultMode.
+    // The picker is READ FROM THE CLI, not curated here: the catalogue is served by
+    // the backend and was measured changing shape twice in one day, so any list
+    // written down goes stale silently. Falls back to the static MODEL_CATALOG on
+    // any failure — see live-model-catalog.ts. `default` is present in both, which
+    // is why the seed below can stay a constant.
+    const liveModelCatalog = await resolveModelCatalog(this.logger);
     const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO);
     const modes: SessionModeState = {
       currentModeId: seededMode,
@@ -3728,7 +3735,7 @@ export class ClaudeAcpAgent implements Agent {
     const configOptions = buildConfigOptions(
       modes,
       DEFAULT_MODEL_INFO.value,
-      MODEL_CATALOG,
+      liveModelCatalog,
       settingsManager.getSettings().effortLevel,
       agents,
       undefined,
@@ -3765,7 +3772,7 @@ export class ClaudeAcpAgent implements Agent {
         cachedWriteTokens: 0,
       },
       modes,
-      modelInfos: MODEL_CATALOG,
+      modelInfos: liveModelCatalog,
       agents,
       configOptions,
       contextWindowSize:
@@ -3908,7 +3915,7 @@ function buildConfigOptions(
       options: modelInfos.map((m) => ({
         value: m.value,
         name: m.displayName,
-        // Story 072 — prepend the version/context label ("Opus 4.8 with 1M context · <tagline>"),
+        // Story 072 — prepend the version/context label ("Opus 5.5 with 1M context · <tagline>"),
         // mirroring the live `/model` picker; bare tagline when no label (e.g. opusplan).
         description: modelSelectorDescription(m) || undefined,
       })),
@@ -4702,7 +4709,7 @@ export function runAcp(deps?: AgentDeps) {
  *  not call), as detailed below.
  *
  *  Story 068 (R1, R1.1, R1.2): consults the static {@link MODEL_CONTEXT_WINDOWS}
- *  alias→window map FIRST (an exact catalog-`value` hit — `default`/`fable5`/`opus`/
+ *  alias→window map FIRST (an exact catalog-`value` hit — `default`/`fable`/`opus`/
  *  `sonnet`=1M, `haiku`=200K). This fixes `opus` having wrongly reported 200K, and
  *  `sonnet` now seeds 1M (Sonnet 5 is native 1M). An alias absent from the map then
  *  falls back to the legacy `\b1m\b` inference: Anthropic 1M-context variants
@@ -4714,7 +4721,12 @@ export function inferContextWindowFromModel(model: string): number | null {
   const mapped = MODEL_CONTEXT_WINDOWS[model];
   if (mapped !== undefined) return mapped; // exact alias hit (!== undefined, NOT truthiness)
   if (/\b1m\b/i.test(model)) return 1_000_000; // unknown alias that still encodes a 1m token
-  return null; // caller applies ?? DEFAULT_CONTEXT_WINDOW
+  // A LIVE picker value is often a full wire id (`claude-fable-5-1`), which the
+  // curated alias map cannot contain and the `1m` token does not mark. Reuse the
+  // id-shaped resolver rather than duplicating its family/version table — without
+  // this, every live row seeds 200K and Fable/Opus under-report until the first
+  // turn corrects them.
+  return inferContextWindowFromModelId(model);
 }
 
 /** Story 069 (R1) — AUTHORITATIVE context window from a turn's REAL model ID (the JSONL `model`

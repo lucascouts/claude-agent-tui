@@ -4,9 +4,12 @@
 // portable FRAGMENTS, no whole commits. This file pins one behaviour per ported fragment, plus
 // the catalogue entry R5.2 asks for.
 //
-//   R5.2  Fable 5.1 joins the curated catalogue. The alias is read from the installed binary
-//         (`strings /opt/bin/claude` → `fable51`, `claude-fable-5-1`), never guessed, and the
-//         entry declares its effort capability like every other Claude-5-family surface.
+//   R5.2  Fable 5.1 joins the curated catalogue, under the alias the CLI ACCEPTS and declaring its
+//         effort capability like every other Claude-5-family surface. The alias was originally
+//         taken from `strings /opt/bin/claude` (`fable51`), and that was WRONG: the binary carries
+//         that token as an internal id→short-name mapping, not as a `--model` value. The CLI's
+//         alias vocabulary is a closed set that holds only tier names, so `fable51` 404'd at spawn
+//         with `[claude-code:unrecognized_model]`. Corrected 2026-09-23 to the probed `fable`.
 //   R7.3  `#1079` and `#1080` are PORTABLE IN PART, so the reachable part lands AND the code
 //         records which half was cut.
 //   R7.4  A port that would deliver upstream's degraded path, or produce data no client renders,
@@ -25,7 +28,6 @@ import {
   MODEL_CATALOG,
   MODEL_CONTEXT_WINDOWS,
   MODEL_ID_CONTEXT_WINDOWS,
-  MODEL_VERSION_LABELS,
   REASONING_EFFORT_LEVELS,
 } from "../dist/model-catalog.js";
 import {
@@ -42,16 +44,17 @@ import {
 // ---- R5.2 — Fable 5.1 in the curated catalogue ---------------------------------------------
 
 test("R5.2 the catalogue offers Fable 5.1 under the alias the installed CLI accepts", () => {
-  const entry = MODEL_CATALOG.find((m) => m.value === "fable51");
+  const entry = MODEL_CATALOG.find((m) => m.value === "fable");
   assert.ok(
     entry,
-    "MODEL_CATALOG must carry a `fable51` entry — the alias is in the installed binary " +
-      "(fable51, claude-fable-5-1), so the catalogue is what is behind, not the CLI",
+    "MODEL_CATALOG must carry a `fable` entry — that is the tier alias `--model` accepts, probed " +
+      "with a real turn (→ claude-fable-5-1). The version-numbered `fable51` this test used to " +
+      "demand is rejected by the CLI, so asserting it pinned a picker row that could only 404",
   );
 });
 
 test("R5.2 the Fable 5.1 entry declares its effort capability", () => {
-  const entry = MODEL_CATALOG.find((m) => m.value === "fable51");
+  const entry = MODEL_CATALOG.find((m) => m.value === "fable");
   assert.equal(
     entry?.supportsEffort,
     true,
@@ -65,33 +68,47 @@ test("R5.2 the Fable 5.1 entry declares its effort capability", () => {
   );
 });
 
-test("R5.2 Fable 5.1 leads Fable 5 in the picker, newest first", () => {
-  const i51 = MODEL_CATALOG.findIndex((m) => m.value === "fable51");
-  const i5 = MODEL_CATALOG.findIndex((m) => m.value === "fable5");
-  assert.ok(i51 >= 0 && i5 >= 0, "both Fable entries must exist");
+test("R5.2 Fable leads the family rows, right after `default`", () => {
+  const iFable = MODEL_CATALOG.findIndex((m) => m.value === "fable");
   assert.equal(
-    i51,
-    i5 - 1,
-    "Fable 5.1 must sit IMMEDIATELY BEFORE Fable 5 — the newest member of the family leads it, " +
-      "the way `fable5` itself sits right after `default`. Adjacency is the assertion: a 5.1 " +
+    iFable,
+    1,
+    "Fable must sit IMMEDIATELY AFTER `default` — the most capable family leads the picker. A row " +
       "parked at the end of the list is present but not offered",
   );
 });
 
-test("R5.2 Fable 5.1 carries a version label, so the selector description composes", () => {
-  assert.match(
-    MODEL_VERSION_LABELS.fable51 ?? "",
-    /Fable 5\.1/,
-    "modelSelectorDescription() composes `<version label> · <tagline>`; without a label the entry " +
-      "renders as a bare tagline and is indistinguishable from Fable 5 in the picker",
+test("R5.2 no catalogue row is a version-numbered alias, which the CLI rejects", () => {
+  // The regression this guards is the one that produced `fable51`/`fable5`: a token lifted out of
+  // `strings /opt/bin/claude` that is an INTERNAL id→short-name mapping, not a `--model` value.
+  // The accepted vocabulary is tier names (plus `best`, `opusplan`, a `[1m]` suffix) and full wire
+  // ids; anything else 404s at spawn, and nothing in this repo fails until a user picks the row.
+  const offenders = MODEL_CATALOG.map((m) => m.value).filter((v) => /^[a-z]+\d/.test(v));
+  assert.deepEqual(
+    offenders,
+    [],
+    "a version-numbered alias (fable51, opus55, sonnet46…) is not in the CLI's alias set. Pin the " +
+      "tier alias instead, or the full wire id, and PROBE it: " +
+      "`claude -p ok --model <value> --output-format json | jq .is_error`",
   );
+});
+
+test("R5.2 the Fable fallback row names its concrete version, in title AND description", () => {
+  // The INTENT is unchanged from when this asserted MODEL_VERSION_LABELS: the version
+  // the tier alias resolves to — the one thing the alias itself cannot show — must be
+  // visible in the picker. The MECHANISM changed: rows are now self-contained, because
+  // live rows arrive that way and a curated prefix prepended to them produced doubled
+  // copy. So the assertion moved from the removed label map onto the row itself.
+  const entry = MODEL_CATALOG.find((m) => m.value === "fable");
+  assert.match(entry?.displayName ?? "", /Fable 5\.1/);
+  assert.match(entry?.description ?? "", /Fable 5\.1/);
 });
 
 test("R5.2 Fable 5.1's window is declared in BOTH tables, which are not the same table", () => {
   assert.equal(
-    MODEL_CONTEXT_WINDOWS.fable51,
+    MODEL_CONTEXT_WINDOWS.fable,
     1_000_000,
-    "the alias table seeds the window from what `/model fable51` sends",
+    "the alias table seeds the window from what `/model fable` sends",
   );
   assert.equal(
     MODEL_ID_CONTEXT_WINDOWS["claude-fable-5-1"],

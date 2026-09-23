@@ -42,23 +42,28 @@ test("2.1 DEFAULT_MODEL_INFO advertises the full parity level set incl. xhigh + 
 
 // ---- catalog parity (056 v3 / R7) — order + membership mirror the original's /model picker --------
 
-test("catalog order + membership: default, fable51, fable5, opus, sonnet, haiku", () => {
-  // `fable5` (Claude 5 family, released 2026-07-01) sits right after `default`, and story 009's
-  // R5.2 put `fable51` immediately BEFORE it — newest of the family first. The redundant
-  // `sonnet[1m]` alias and the fork-only `opusplan` extra were dropped (Sonnet 5 is natively 1M).
+test("catalog order + membership: default, fable, opus, sonnet, haiku", () => {
+  // TIER aliases only: `fable` sits right after `default`. The version-numbered `fable51`/`fable5`
+  // rows were removed — the CLI rejects both (`[claude-code:unrecognized_model]`), so they were
+  // picker entries that could only ever 404. The redundant `sonnet[1m]` alias and the fork-only
+  // `opusplan` extra were dropped earlier (Sonnet 5 is natively 1M).
   assert.deepEqual(
     MODEL_CATALOG.map((m) => m.value),
-    ["default", "fable51", "fable5", "opus", "sonnet", "haiku"],
-    "catalog order must be Default/Fable 5/Opus/Sonnet/Haiku",
+    ["default", "fable", "opus", "sonnet", "haiku"],
+    "catalog order must be Default/Fable/Opus/Sonnet/Haiku",
   );
   const byVal = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!;
   assert.equal(byVal("default").displayName, "Default (recommended)", "default label carries (recommended)");
-  assert.equal(byVal("fable5").displayName, "Fable", "the Claude 5 top model is `fable5` (bare title)");
+  assert.equal(
+    byVal("fable").displayName,
+    "Fable 5.1",
+    "fallback rows name their concrete version, the way the live CLI rows do",
+  );
 });
 
-test("supportsAutoMode set on default/fable5/opus/sonnet, NOT haiku", () => {
+test("supportsAutoMode set on default/fable/opus/sonnet, NOT haiku", () => {
   const auto = (v: string) => MODEL_CATALOG.find((m) => m.value === v)!.supportsAutoMode === true;
-  for (const v of ["default", "fable51", "fable5", "opus", "sonnet"]) {
+  for (const v of ["default", "fable", "opus", "sonnet"]) {
     assert.ok(auto(v), `${v} must declare supportsAutoMode (surfaces the auto permission mode)`);
   }
   assert.ok(!auto("haiku"), "haiku must NOT declare supportsAutoMode (auto dropped — parity with the original)");

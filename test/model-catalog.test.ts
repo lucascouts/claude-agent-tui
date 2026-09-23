@@ -1,7 +1,7 @@
 // Story 046 / Task 2.1 — the static curated model catalog (R1.1, R2.1).
 //
 // CONTRACT (story.md R1.1 / R2.1 + design.md §5/§7): a new `model-catalog.ts` exports a static
-// curated `ModelInfo[]` of TUI-accepted aliases — `default`, `fable5`, `opus`, `sonnet`, `haiku` —
+// curated `ModelInfo[]` of TUI-accepted aliases — `default`, `fable`, `opus`, `sonnet`, `haiku` —
 // replacing the single static `[DEGRAU1_DEFAULT_MODEL_INFO]`. `default` stays a safe fallback entry.
 // Effort-capable entries declare `supportsEffort` + a non-empty `supportedEffortLevels` (which is what
 // unlocks the effort selector via `buildConfigOptions`, design §7). This file pins the catalog as a
@@ -12,9 +12,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MODEL_CATALOG } from "../dist/model-catalog.js";
 
-// Story 009 R5.2 added `fable51`: the Claude 5 family's newest member LEADS `fable5`, so the
-// contract is still exact order + exact membership, with one more member.
-const EXPECTED_ALIASES = ["default", "fable51", "fable5", "opus", "sonnet", "haiku"];
+// Story 009 R5.2 added `fable51` and this round REMOVED it, together with `fable5`: neither is in
+// the CLI's alias vocabulary, so both rows 404'd at spawn. The single `fable` tier alias replaces
+// them — probed with a real turn (`--model fable` → `claude-fable-5-1`), not read out of `strings`.
+// The contract is unchanged: exact order + exact membership.
+const EXPECTED_ALIASES = ["default", "fable", "opus", "sonnet", "haiku"];
 
 test("2.1 catalog: exports more than the single static entry (R1.1 — was 1 item)", () => {
   assert.ok(Array.isArray(MODEL_CATALOG), "MODEL_CATALOG is an array of ModelInfo");
