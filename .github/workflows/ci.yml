@@ -97,7 +97,7 @@ jobs:
           fetch-depth: 0
 
       - name: Run trufflehog
-        uses: trufflesecurity/trufflehog@363923b901c911a9164f50b6c423f47c15372b1c # v3.97.4
+        uses: trufflesecurity/trufflehog@f714bf454f350590f4a24c3ddb1aef02c35bf5b6 # v3.97.5
         with:
           # The SHA above pins the composite wrapper, not the scanner. The wrapper ends
           # in `docker run "${IMAGE}:${VERSION}"` and `version` defaults to `latest`, so
