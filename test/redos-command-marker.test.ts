@@ -131,7 +131,12 @@ function pathological(n: number): string {
   return opener.repeat(Math.ceil(n / opener.length)).slice(0, n);
 }
 
-function minStripMs(input: string, runs = 3): number {
+// Seven samples, not three: the minimum is what makes a timing robust to a GC pause
+// or a scheduler hiccup, and three samples were too few for it on a loaded machine
+// -- a full run on 2026-09-25 measured a 3.88x ratio at a few milliseconds, then
+// passed 5/5 alone. The quadratic regex this guards against takes seconds at these
+// sizes, so the absolute < 50 ms bounds below still catch it on their own.
+function minStripMs(input: string, runs = 7): number {
   let best = Infinity;
   for (let r = 0; r < runs; r++) {
     const start = performance.now();
