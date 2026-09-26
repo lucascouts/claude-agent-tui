@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.3](https://github.com/lucascouts/claude-agent-tui/compare/v0.14.2...v0.14.3) (2026-09-26)
+
+
+### Fixed
+
+* **permissions:** honor permissions.disableBypassPermissionsMode ([071278d](https://github.com/lucascouts/claude-agent-tui/commit/071278d15d5e1f125c3751a75e89b61a29d1e7f5))
+
 ## [0.14.2](https://github.com/lucascouts/claude-agent-tui/compare/v0.14.1...v0.14.2) (2026-09-26)
 
 
