@@ -53,6 +53,7 @@ import {
   PermissionUpdate,
   SDKMessageOrigin,
   SDKPartialAssistantMessage,
+  Settings,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ContentBlockParam } from "@anthropic-ai/sdk/resources";
 import { BetaContentBlock, BetaRawContentBlockDelta } from "@anthropic-ai/sdk/resources/beta.mjs";
@@ -280,6 +281,13 @@ type Session = {
   accumulatedUsage: AccumulatedUsage;
   modes: SessionModeState;
   modelInfos: ModelInfo[];
+  /**
+   * Upstream #1165: whether this session may offer/enter `bypassPermissions` — {@link ALLOW_BYPASS}
+   * AND not disabled by `permissions.disableBypassPermissionsMode` ({@link sessionAllowsBypass}).
+   * Decided once at createSession; the model-change catalog rebuild reads it. Absent (hand-built
+   * test sessions) falls back to the process-wide {@link ALLOW_BYPASS}.
+   */
+  allowBypass?: boolean;
   /**
    * Story 056 (R3.2) — the main-thread agent personas discovered for this session's cwd at
    * create time ({@link discoverAgents}, glob-only). Stored so the model-change reconcile in
@@ -1194,6 +1202,18 @@ function shouldHideClaudeAuth(): boolean {
 const IS_ROOT = (process.geteuid?.() ?? process.getuid?.()) === 0;
 const ALLOW_BYPASS = !IS_ROOT || !!process.env.IS_SANDBOX;
 
+/**
+ * Ported from upstream #1165 (281e47e): Claude Code refuses `bypassPermissions` when any settings
+ * tier (user, project, local, managed) sets `permissions.disableBypassPermissionsMode` to
+ * `"disable"`. The key can only take a permission away, so it is honoured from every tier, project
+ * included. Decided once per session and fed to every gate that used the process-wide
+ * {@link ALLOW_BYPASS}: the mode catalog, the `defaultMode` seed, and (through the catalog) the
+ * set_mode / set_config_option re-spawn into `--permission-mode bypassPermissions`.
+ */
+export function sessionAllowsBypass(permissions: Settings["permissions"] | undefined): boolean {
+  return ALLOW_BYPASS && permissions?.disableBypassPermissionsMode !== "disable";
+}
+
 // Slash commands that the SDK handles locally without replaying the user
 // message and without invoking the model.
 const LOCAL_ONLY_COMMANDS = new Set(["/context", "/heapdump", "/extra-usage"]);
@@ -1351,6 +1371,7 @@ const PERMISSION_MODE_ALIASES: Record<string, PermissionMode> = {
 export function resolvePermissionMode(
   defaultMode?: unknown,
   logger: Logger = console,
+  allowBypass: boolean = ALLOW_BYPASS,
 ): PermissionMode {
   if (defaultMode === undefined) {
     return "default";
@@ -1373,9 +1394,11 @@ export function resolvePermissionMode(
     return "default";
   }
 
-  if (mapped === "bypassPermissions" && !ALLOW_BYPASS) {
+  if (mapped === "bypassPermissions" && !allowBypass) {
     logger.error(
-      "Ignoring permissions.defaultMode from settings: bypassPermissions is not available when running as root.",
+      ALLOW_BYPASS
+        ? "Ignoring permissions.defaultMode from settings: bypassPermissions is disabled by permissions.disableBypassPermissionsMode."
+        : "Ignoring permissions.defaultMode from settings: bypassPermissions is not available when running as root.",
     );
     return "default";
   }
@@ -3463,7 +3486,10 @@ export class ClaudeAcpAgent implements Agent {
       // mode if the SDK no longer offers it (today: "auto" on Haiku).
       // `ModelInfo.supportsAutoMode` is the canonical SDK signal.
       const newModelInfo = session.modelInfos.find((m) => m.value === value);
-      const newAvailableModes = buildAvailableModes(newModelInfo);
+      const newAvailableModes = buildAvailableModes(
+        newModelInfo,
+        session.allowBypass ?? ALLOW_BYPASS,
+      );
       // Capture BEFORE mutating session.modes so the log message reflects
       // the invalidated mode rather than "default".
       const previousModeId = session.modes.currentModeId;
@@ -3649,9 +3675,15 @@ export class ClaudeAcpAgent implements Agent {
     // on undefined/invalid AND strips bypassPermissions under the root guard — so R3.1 reconciles
     // with R3.6). Drives both the spawn flag (--permission-mode, fresh path) and the advertised
     // currentModeId, replacing the old hardcoded "default".
+    // Upstream #1165: bypass is also off when any settings tier sets
+    // permissions.disableBypassPermissionsMode to "disable" (the CLI refuses it then too). Decided
+    // once here: it gates the defaultMode seed, the advertised catalog, and therefore every later
+    // set_mode / set_config_option request for bypass (applySessionMode checks the catalog).
+    const allowBypass = sessionAllowsBypass(settingsManager.getSettings().permissions);
     const seededMode = resolvePermissionMode(
       settingsManager.getSettings().permissions?.defaultMode,
       this.logger,
+      allowBypass,
     );
 
     // Per-session task state — still surfaced via plan notifications by the Group 2 pump / hooks.
@@ -3772,7 +3804,7 @@ export class ClaudeAcpAgent implements Agent {
     // any failure — see live-model-catalog.ts. `default` is present in both, which
     // is why the seed below can stay a constant.
     const liveModelCatalog = await resolveModelCatalog(this.logger);
-    const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO);
+    const availableModes = buildAvailableModes(DEFAULT_MODEL_INFO, allowBypass);
     const modes: SessionModeState = {
       currentModeId: seededMode,
       availableModes,
@@ -3824,6 +3856,7 @@ export class ClaudeAcpAgent implements Agent {
       },
       modes,
       modelInfos: liveModelCatalog,
+      allowBypass,
       agents,
       configOptions,
       contextWindowSize:
@@ -3850,9 +3883,13 @@ export class ClaudeAcpAgent implements Agent {
  * Build the list of permission modes the agent will advertise for the given
  * model. `auto` is gated by `ModelInfo.supportsAutoMode === true`, which is
  * the SDK's model-level availability signal. `undefined`/`false` both exclude
- * `auto`. `bypassPermissions` is still gated by `ALLOW_BYPASS`.
+ * `auto`. `bypassPermissions` is gated by the per-session `allowBypass`
+ * ({@link sessionAllowsBypass}: `ALLOW_BYPASS` and not disabled by settings).
  */
-function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState["availableModes"] {
+function buildAvailableModes(
+  modelInfo: ModelInfo | undefined,
+  allowBypass: boolean,
+): SessionModeState["availableModes"] {
   const modes: SessionModeState["availableModes"] = [];
 
   // `_meta.kind` is ported from upstream #1025 (REBASE-AND-DRIFT.md §15.5): a coarse
@@ -3907,7 +3944,7 @@ function buildAvailableModes(modelInfo: ModelInfo | undefined): SessionModeState
     },
   );
 
-  if (ALLOW_BYPASS) {
+  if (allowBypass) {
     modes.push({
       id: "bypassPermissions",
       name: "Bypass Permissions",
