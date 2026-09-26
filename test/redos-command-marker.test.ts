@@ -72,8 +72,10 @@ test("array-of-blocks path is unchanged (Unchanged #3)", () => {
     { type: "text", text: "keep" },
     { type: "image", source: "x" },
   ]);
+  // `/model`, not an arbitrary `/m`: since the upstream #1035 port a marker-only record naming a
+  // non-local command is reconstructed as a prompt, so only a client-local one still strips to null.
   assert.equal(
-    stripLocalCommandMetadata([{ type: "text", text: "<command-name>/m</command-name>" }]),
+    stripLocalCommandMetadata([{ type: "text", text: "<command-name>/model</command-name>" }]),
     null,
   );
 });

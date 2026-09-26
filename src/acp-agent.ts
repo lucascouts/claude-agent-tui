@@ -1196,6 +1196,25 @@ const ALLOW_BYPASS = !IS_ROOT || !!process.env.IS_SANDBOX;
 
 // Slash commands that the SDK handles locally without replaying the user
 // message and without invoking the model.
+const LOCAL_ONLY_COMMANDS = new Set(["/context", "/heapdump", "/extra-usage"]);
+
+// Commands whose marker-only transcript records are client-local UI noise, not
+// model-visible user prompts (port of upstream #1035, 97394d9). Marker-only
+// custom slash skills are not in this list, so replay can reconstruct them from
+// `<command-name>`/`<command-args>`. `/effort` and `/fast` are the tui's own:
+// the config-option applies and the fast-mode probe type them into the PTY, and
+// the CLI records them like any user-typed command — without an entry every
+// config change would surface in the thread as a prompt the user never sent.
+// `/model` is injected the same way and is already covered upstream.
+const REPLAY_HIDDEN_COMMANDS = new Set([
+  ...LOCAL_ONLY_COMMANDS,
+  "/compact",
+  "/model",
+  "/status",
+  "/usage",
+  "/effort",
+  "/fast",
+]);
 
 // The Claude SDK persists local slash command invocations (e.g. `/model`) and
 // their output as user messages in the session transcript, wrapping the
@@ -1241,16 +1260,49 @@ function stripMarkerTags(text: string): string {
   return result + text.slice(copiedUpTo);
 }
 
+function markerTagText(text: string, tag: string): string | undefined {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = text.indexOf(open);
+  if (start === -1) return undefined;
+  const end = text.indexOf(close, start + open.length);
+  if (end === -1) return undefined;
+  return text.slice(start + open.length, end);
+}
+
+function hasMarkerTag(text: string, tag: string): boolean {
+  return markerTagText(text, tag) !== undefined;
+}
+
+function commandInvocationFromMarkerOnlyText(text: string): string | null {
+  if (hasMarkerTag(text, "local-command-stdout") || hasMarkerTag(text, "local-command-stderr")) {
+    return null;
+  }
+  const commandName = markerTagText(text, "command-name")?.trim();
+  if (!commandName?.startsWith("/")) return null;
+  if (REPLAY_HIDDEN_COMMANDS.has(commandName.split(" ", 1)[0])) return null;
+
+  const commandArgs = markerTagText(text, "command-args")?.trim();
+  return commandArgs ? `${commandName} ${commandArgs}` : commandName;
+}
+
+function stripLocalCommandMetadataText(text: string): string | null {
+  const stripped = stripMarkerTags(text);
+  if (stripped.trim() !== "") return stripped;
+  return commandInvocationFromMarkerOnlyText(text);
+}
+
 /**
  * Return user-message content with local-command marker tags removed, or
  * `null` if nothing meaningful remains (caller should skip the message).
  * Preserves real prose that's mixed in alongside the markers — e.g. a
- * message like `<command-name>…</command-name>hi` becomes `hi`.
+ * message like `<command-name>…</command-name>hi` becomes `hi`. A marker-only
+ * slash-skill record is reconstructed as `/name args` unless it is client-local
+ * (see REPLAY_HIDDEN_COMMANDS) or carries local stdout/stderr.
  */
 export function stripLocalCommandMetadata(content: unknown): unknown | null {
   if (typeof content === "string") {
-    const stripped = stripMarkerTags(content);
-    return stripped.trim() === "" ? null : stripped;
+    return stripLocalCommandMetadataText(content);
   }
   if (!Array.isArray(content)) return content;
 
@@ -1264,8 +1316,8 @@ export function stripLocalCommandMetadata(content: unknown): unknown | null {
       "text" in block &&
       typeof (block as { text: unknown }).text === "string"
     ) {
-      const stripped = stripMarkerTags((block as { text: string }).text);
-      if (stripped.trim() === "") continue;
+      const stripped = stripLocalCommandMetadataText((block as { text: string }).text);
+      if (stripped === null) continue;
       kept.push({ ...(block as object), text: stripped });
     } else {
       kept.push(block);
