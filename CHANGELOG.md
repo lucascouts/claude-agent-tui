@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.1](https://github.com/lucascouts/claude-agent-tui/compare/v0.14.0...v0.14.1) (2026-09-26)
+
+
+### Fixed
+
+* **replay:** replay marker-only slash skill prompts ([d5fefc0](https://github.com/lucascouts/claude-agent-tui/commit/d5fefc0c6ba9409a8df677ae8ee02a775eb90464))
+* **startup:** keep the agent starting when the managed-policy tier cannot be read ([05a13b2](https://github.com/lucascouts/claude-agent-tui/commit/05a13b2dcd17d1221b39e9d643884c2bce09611d))
+* **tools:** render Write calls that use the path/file_text aliases ([bffe5a2](https://github.com/lucascouts/claude-agent-tui/commit/bffe5a239ac1785b239dc86fd90195da10d2d731))
+
+
+### Infrastructure
+
+* **deps:** bump fast-uri from 3.1.7 to 3.1.8 ([#108](https://github.com/lucascouts/claude-agent-tui/issues/108)) ([b70da7c](https://github.com/lucascouts/claude-agent-tui/commit/b70da7c80b2fad264df1e6fd003c782a97ae3ab8))
+* **deps:** bump github/codeql-action/upload-sarif ([#106](https://github.com/lucascouts/claude-agent-tui/issues/106)) ([23a29f3](https://github.com/lucascouts/claude-agent-tui/commit/23a29f353d414273bbc3fa5d3f1d075f2f2a04bf))
+* **deps:** bump google/osv-scanner-action/osv-scanner-action ([#104](https://github.com/lucascouts/claude-agent-tui/issues/104)) ([a47b4a1](https://github.com/lucascouts/claude-agent-tui/commit/a47b4a1dfb576a0f07bd86bfd1360bf40f75d4e8))
+* **deps:** bump trufflesecurity/trufflehog from 3.97.4 to 3.97.5 ([#105](https://github.com/lucascouts/claude-agent-tui/issues/105)) ([fa3175d](https://github.com/lucascouts/claude-agent-tui/commit/fa3175d0c736f3a6b4a21fdb24cc332e6d11b5b2))
+
 ## [0.14.0](https://github.com/lucascouts/claude-agent-tui/compare/v0.13.3...v0.14.0) (2026-09-23)
 
 
