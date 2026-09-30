@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const forkRoot = join(here, "..");
 const sdkRoot = join(forkRoot, "node_modules", "@agentclientprotocol", "sdk");
 
-// The 1.4.0 discriminant set (the `sessionUpdate` literal of each variant).
+// The 1.5.1 discriminant set (the `sessionUpdate` literal of each variant).
 // 0.25.0 added `plan_update` and `plan_removed` to the union (additive vs 0.22.1).
 // The 0.28.1 → 1.0.0 major bump (story 056) did NOT change the SessionUpdate
 // discriminant set — the 1.0.0 delta is additive elsewhere; these 13 variants are
@@ -31,6 +31,9 @@ const sdkRoot = join(forkRoot, "node_modules", "@agentclientprotocol", "sdk");
 // shipped in a minor, which is why the bump did not typecheck until the call sites
 // moved. Recorded here because the union assertion is the only place this project
 // keeps a per-version ledger of what the SDK did.
+// The 1.4.0 → 1.5.1 bump (2026-09-29, for GHSA-6q4g-4xp9-ch96 — uncapped stdio
+// buffering, fixed in 1.5.1) adds ONE variant: ADDED=["notice"], REMOVED=[]. 1.5.0
+// introduced session notices; this adapter sends none, so nothing consumes it.
 const EXPECTED_VARIANTS = [
   "user_message_chunk",
   "agent_message_chunk",
@@ -47,11 +50,12 @@ const EXPECTED_VARIANTS = [
   "usage_update",
   "compaction_update",
   "compaction_summary_chunk",
+  "notice",
 ];
 
-test("session update union: the ACP SDK is pinned to 1.4.0", () => {
+test("session update union: the ACP SDK is pinned to 1.5.1", () => {
   const pkg = JSON.parse(readFileSync(join(sdkRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "1.4.0", "the ACP schema/transport SDK is pinned at 1.4.0");
+  assert.equal(pkg.version, "1.5.1", "the ACP schema/transport SDK is pinned at 1.5.1");
 });
 
 test("session update union: SessionUpdate is not redefined or shadowed in fork src", () => {
@@ -65,7 +69,7 @@ test("session update union: SessionUpdate is not redefined or shadowed in fork s
   }
 });
 
-test("session update union: variant set matches SDK 1.4.0 (no unexpected shape drift)", () => {
+test("session update union: variant set matches SDK 1.5.1 (no unexpected shape drift)", () => {
   const dts = readFileSync(join(sdkRoot, "dist", "schema", "types.gen.d.ts"), "utf8");
   const declIdx = dts.indexOf("export type SessionUpdate =");
   assert.ok(declIdx !== -1, "SessionUpdate union must be defined in the SDK type surface");
@@ -77,7 +81,7 @@ test("session update union: variant set matches SDK 1.4.0 (no unexpected shape d
   assert.deepEqual(
     [...found].sort(),
     [...EXPECTED_VARIANTS].sort(),
-    "the SessionUpdate discriminated-union variant set drifted from the expected 1.4.0 set",
+    "the SessionUpdate discriminated-union variant set drifted from the expected 1.5.1 set",
   );
 });
 
