@@ -6,7 +6,7 @@ mirror of an ACP bridge that drives the Claude Code subscription TUI over a PTY.
 ## Ways to contribute
 
 - **Report a bug or request a feature** via
-  [GitHub Issues](https://github.com/lucascouts/claude-agent-tui/issues).
+  [GitHub Issues](https://github.com/zeo-workspace/claude-agent-tui/issues).
   Include your OS, Node version, Zed (or other ACP client) version, and a
   minimal reproduction.
 - **Report a vulnerability** privately — do **not** open a public issue. See

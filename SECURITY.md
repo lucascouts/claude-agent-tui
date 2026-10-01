@@ -42,7 +42,7 @@ the tarball signature with:
 cosign verify-blob \
   --certificate claude-agent-tui-<ver>.tar.gz.pem \
   --signature   claude-agent-tui-<ver>.tar.gz.sig \
-  --certificate-identity-regexp 'https://github.com/lucascouts/claude-agent-tui/.*' \
+  --certificate-identity-regexp 'https://github.com/zeo-workspace/claude-agent-tui/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   claude-agent-tui-<ver>.tar.gz
 ```
