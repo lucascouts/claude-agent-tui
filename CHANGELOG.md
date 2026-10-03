@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This project is a fork of [`@agentclientprotocol/claude-agent-acp`](https://github.com/agentclientprotocol/claude-agent-acp) v0.53.0 (see [`.fork-provenance.json`](.fork-provenance.json)).
 
+## [0.14.6](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.5...v0.14.6) (2026-10-03)
+
+
+### Fixed
+
+* **deps:** @modelcontextprotocol/sdk 1.31.0 -&gt; 1.32.0, clearing GHSA-22jm-h49p-29qw and GHSA-6prh-2h8m-c8cw ([570ed57](https://github.com/zeo-workspace/claude-agent-tui/commit/570ed576bb9ddd552f567cda17088dd211e99ef6))
+
 ## [0.14.5](https://github.com/zeo-workspace/claude-agent-tui/compare/v0.14.4...v0.14.5) (2026-10-03)
 
 
