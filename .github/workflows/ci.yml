@@ -62,10 +62,22 @@ jobs:
           fetch-depth: 0
 
       - name: Run gitleaks
-        # Pinned by SHA (v3.0.0, node24 runtime). Free for individual public repos.
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
+        # The CLI, not gitleaks/gitleaks-action: the action demands a license key
+        # on organization-owned repositories, and this one moved to the
+        # zeo-workspace organization on 2026-10-01, after which every run failed
+        # with "missing gitleaks license". Same scanner, pinned by version and
+        # sha256 instead of by action SHA. It scans the full history, which is
+        # clean, rather than only the pull request's commits.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "${tarball}" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${tarball}"
+          echo "${GITLEAKS_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .
 
   osv-scan:
     name: SCA (OSV-Scanner, warn-first)
